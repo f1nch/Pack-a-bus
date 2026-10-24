@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Weekly audit run catches newly published advisories.
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: f1nch/ci-workflows/.github/workflows/node-ci.yml@v1
+    with:
+      audit-level: high
