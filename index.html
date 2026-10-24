@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="theme-color" content="#1b2238" />
+    <title>Pack-a-Bus</title>
+  </head>
+  <body>
+    <div id="stage">
+      <canvas id="game"></canvas>
+      <div id="ui">
+        <div class="topbar">
+          <div class="pill">Level <b id="level">1</b></div>
+          <div class="timer"><span class="bomb">💣</span><span id="time">00:00</span></div>
+          <div class="buttons">
+            <button id="btn-sound" class="icon" aria-label="Toggle sound">🔊</button>
+            <button id="btn-restart" class="icon" aria-label="Restart level">↻</button>
+          </div>
+        </div>
+
+        <div class="bottombar">
+          <button id="btn-vip" class="booster vip">VIP <span class="count">1</span></button>
+          <div class="pill remain">👥 <b id="remain">0</b></div>
+          <button id="btn-slot" class="booster">+Spot <span class="count">1</span></button>
+        </div>
+
+        <div id="toast"></div>
+
+        <div id="modal" class="hidden">
+          <div class="card">
+            <h1 id="modal-title"></h1>
+            <p id="modal-text"></p>
+            <button id="modal-btn"></button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
