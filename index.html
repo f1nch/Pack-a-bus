@@ -14,6 +14,7 @@
           <div class="pill">Level <b id="level">1</b></div>
           <div class="timer"><span class="bomb">💣</span><span id="time">00:00</span></div>
           <div class="buttons">
+            <button id="btn-garage" class="icon" aria-label="Garage">🎨</button>
             <button id="btn-shapes" class="icon" aria-label="Show shapes on passengers" aria-pressed="false">◆</button>
             <button id="btn-sound" class="icon" aria-label="Toggle sound">🔊</button>
             <button id="btn-restart" class="icon" aria-label="Restart level">↻</button>
@@ -26,13 +27,29 @@
           <button id="btn-slot" class="booster">+Spot <span class="count">1</span></button>
         </div>
 
+        <div id="challenge" class="challenge hidden" aria-live="polite"><span class="mark">🎯</span><span class="label"></span></div>
+
         <div id="toast"></div>
         <div id="banner" aria-live="polite"></div>
+
+        <div id="garage" class="hidden" role="dialog" aria-label="Garage">
+          <div class="card garage-card">
+            <h1>🎨 Garage</h1>
+            <p class="sub">Win bonus challenges to open gifts and unlock paint jobs.</p>
+            <div class="grid"></div>
+            <button id="garage-close">Done</button>
+          </div>
+        </div>
 
         <div id="modal" class="hidden">
           <div class="card">
             <h1 id="modal-title"></h1>
             <div id="modal-stars" class="stars hidden" role="img"></div>
+            <div id="modal-gift" class="gift hidden">
+              <div class="box" aria-hidden="true">🎁</div>
+              <canvas width="320" height="110" aria-hidden="true"></canvas>
+              <span class="label"></span>
+            </div>
             <p id="modal-text"></p>
             <div id="modal-bar" class="bar hidden" role="progressbar" aria-valuemin="0" aria-valuemax="100">
               <div class="fill"></div>

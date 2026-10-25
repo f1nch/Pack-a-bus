@@ -21,9 +21,92 @@ import {
 } from './layout';
 import { MYSTERY, PALETTE, SYMBOLS, type Shade, type ShapeId } from './palette';
 import { personPos, QUEUE_VISIBLE } from './queuePath';
+import type { LiveryId } from './liveries';
 import type { ColorId } from './types';
 
 const LOCK_TINTS = ['#ffd84a', '#7ff0ff', '#ff8fd0'];
+
+/** A livery pattern in the bus's rotated frame (x along its length, nose at +x), already
+ *  clipped to the body. `ink` is a translucent white (or dark on white buses). */
+function drawLivery(ctx: CanvasRenderingContext2D, id: LiveryId, len: number, w: number, ink: string): void {
+  const x0 = -len / 2;
+  const x1 = len / 2;
+  ctx.fillStyle = ink;
+  ctx.strokeStyle = ink;
+  switch (id) {
+    case 'stripes':
+      ctx.fillRect(x0, -6, len, 3);
+      ctx.fillRect(x0, 1, len, 3);
+      break;
+    case 'polka':
+      for (let x = x0 + 6; x < x1; x += 10) {
+        for (let y = -w / 2 + 6; y < w / 2; y += 10) circle(ctx, x + ((y + 20) % 20 < 10 ? 0 : 5), y, 2.6);
+      }
+      break;
+    case 'checker':
+      // A checkered band across the tail, like a finish flag.
+      for (let i = 0; i < 4; i++) {
+        for (let j = 0; j < 7; j++) if ((i + j) % 2 === 0) ctx.fillRect(x0 + 4 + i * 5, -w / 2 + j * 5.5, 5, 5.5);
+      }
+      break;
+    case 'flames':
+      // Flame tongues licking back from the nose.
+      for (const [y, l] of [
+        [-9, 30],
+        [0, 38],
+        [9, 30],
+      ]) {
+        ctx.beginPath();
+        ctx.moveTo(x1 - 6, y - 5);
+        ctx.quadraticCurveTo(x1 - l * 0.6, y - 6, x1 - l, y);
+        ctx.quadraticCurveTo(x1 - l * 0.6, y + 6, x1 - 6, y + 5);
+        ctx.fill();
+      }
+      break;
+    case 'zigzag':
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      for (let x = x0; x <= x1; x += 8) ctx.lineTo(x, (Math.round((x - x0) / 8) % 2 ? -4 : 4) - 1);
+      ctx.stroke();
+      break;
+    case 'starry':
+      for (let i = 0; i < Math.floor(len / 9); i++) {
+        const x = x0 + 5 + ((i * 37) % (len - 10));
+        const y = -w / 2 + 5 + ((i * 23) % (w - 10));
+        const r = i % 3 === 0 ? 3.2 : 2;
+        ctx.beginPath();
+        ctx.moveTo(x, y - r);
+        ctx.lineTo(x + r * 0.3, y - r * 0.3);
+        ctx.lineTo(x + r, y);
+        ctx.lineTo(x + r * 0.3, y + r * 0.3);
+        ctx.lineTo(x, y + r);
+        ctx.lineTo(x - r * 0.3, y + r * 0.3);
+        ctx.lineTo(x - r, y);
+        ctx.lineTo(x - r * 0.3, y - r * 0.3);
+        ctx.fill();
+      }
+      break;
+    case 'lightning':
+      ctx.beginPath();
+      ctx.moveTo(x0 + 2, -3);
+      ctx.lineTo(x0 + len * 0.35, -8);
+      ctx.lineTo(x0 + len * 0.42, -1);
+      ctx.lineTo(x0 + len * 0.7, -7);
+      ctx.lineTo(x1 - 14, 4);
+      ctx.lineTo(x0 + len * 0.62, 1);
+      ctx.lineTo(x0 + len * 0.5, 7);
+      ctx.lineTo(x0 + len * 0.3, 0);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    case 'gold':
+      ctx.fillStyle = 'rgba(255,216,74,0.55)';
+      ctx.fillRect(x0, 3, len, 3);
+      break;
+    case 'classic':
+      break;
+  }
+}
 
 /** Draws a color's symbol centered on (x, y) with radius r, in the current fillStyle. */
 function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeId, x: number, y: number, r: number): void {
@@ -104,6 +187,8 @@ export class Renderer {
   reducedMotion = false;
   /** Draw color symbols on passengers too (buses always show theirs). */
   passengerShapes = false;
+  /** Paint job drawn on every bus (cosmetic only). */
+  livery: LiveryId = 'classic';
 
   constructor(private ctx: CanvasRenderingContext2D) {}
 
@@ -134,6 +219,51 @@ export class Renderer {
     for (const bus of game.buses) if (bus.state === 'moving' && bus.lifted) this.drawBus(bus, bus.x, bus.y, bus.angle);
     this.drawFlyers(game);
     this.drawBursts(game);
+  }
+
+  /** One bus on its own (garage tiles and the gift reveal), centered on a canvas of the
+   *  given logical size. */
+  drawPreview(color: ColorId, livery: LiveryId, width: number, height: number, pixelScale: number): void {
+    const ctx = this.ctx;
+    ctx.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    const prev = this.livery;
+    this.livery = livery;
+    const bus = {
+      id: -1,
+      color,
+      length: 3,
+      dir: 'right',
+      col: 0,
+      row: 0,
+      mystery: false,
+      lock: -1,
+      key: -1,
+      capacity: 12,
+      reserved: 0,
+      filled: 0,
+      state: 'lot',
+      slot: -1,
+      x: width / 2,
+      y: height / 2,
+      angle: 0,
+      scale: Math.min(1.4, (width - 16) / busLenPx(3)),
+      path: [],
+      pathTotal: 0,
+      pathDone: 0,
+      lifted: false,
+      bumpT: -1,
+      bumpDist: 0,
+      shakeT: -1,
+      popT: -1,
+      pressT: -1,
+      parkT: -1,
+      countPopT: -1,
+      speed: 0,
+      leaveDelay: 0,
+    } as Bus;
+    this.drawBus(bus, bus.x, bus.y, 0);
+    this.livery = prev;
   }
 
   /** Confetti and a ring when a bus fills up. Reduced motion keeps just a soft ring. */
@@ -326,6 +456,20 @@ export class Renderer {
     ctx.fillStyle = shade.fill;
     roundRect(ctx, -len / 2 + 2, -w / 2 + 2, len - 4, w - 6, 9);
     ctx.fill();
+    if (this.livery !== 'classic') {
+      ctx.save();
+      roundRect(ctx, -len / 2 + 2, -w / 2 + 2, len - 4, w - 6, 9);
+      ctx.clip();
+      // White on colored buses, dark on the white bus, so the pattern never reads as a color.
+      drawLivery(ctx, this.livery, len, w, bus.color === 'white' ? 'rgba(60,70,95,0.45)' : 'rgba(255,255,255,0.6)');
+      ctx.restore();
+      if (this.livery === 'gold') {
+        ctx.strokeStyle = '#ffd84a';
+        ctx.lineWidth = 2.5;
+        roundRect(ctx, -len / 2 + 1, -w / 2 + 1, len - 2, w - 2, 10);
+        ctx.stroke();
+      }
+    }
     // Side windows
     ctx.fillStyle = 'rgba(30,40,70,0.55)';
     const winLen = len - 34;

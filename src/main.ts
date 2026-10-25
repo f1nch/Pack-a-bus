@@ -1,6 +1,8 @@
 import './style.css';
 import { Sfx } from './audio';
+import { type Challenge, challengeFor, challengeResult } from './challenges';
 import { Game } from './game';
+import { giftFor, type Gift, LIVERIES, type LiveryId } from './liveries';
 import { H, W } from './layout';
 import { buildGentlerLevel, buildGradedLevel } from './grade';
 import { twistFor } from './level';
@@ -27,6 +29,11 @@ const SEEN_LOCKS_KEY = 'pack-a-bus.seen.locks';
 /** Legacy: older saves counted spent bonus +Spots instead of keeping a bank. */
 const BONUS_SPENT_KEY = 'pack-a-bus.bonus-spent';
 const BANK_KEY = 'pack-a-bus.bank';
+/** How many liveries beyond Classic are unlocked, and which one is equipped. */
+const LIVERIES_KEY = 'pack-a-bus.liveries';
+const LIVERY_KEY = 'pack-a-bus.livery';
+/** Stars from gift boxes opened after every livery is collected. */
+const GIFT_STARS_KEY = 'pack-a-bus.gift-stars';
 
 const TWIST_INFO: Record<Twist, { title: string; text: string }> = {
   mystery: {
@@ -101,8 +108,35 @@ const el = {
   modalSegs: $('#modal-segs'),
   modalBtn: $<HTMLButtonElement>('#modal-btn'),
   modalAlt: $<HTMLButtonElement>('#modal-alt'),
+  modalGift: $('#modal-gift'),
   shapes: $<HTMLButtonElement>('#btn-shapes'),
+  challenge: $('#challenge'),
+  garageBtn: $<HTMLButtonElement>('#btn-garage'),
+  garage: $('#garage'),
+  garageGrid: $('#garage .grid'),
+  garageClose: $<HTMLButtonElement>('#garage-close'),
 };
+
+/** Saved non-negative integer, or `fallback` if missing or junk; never above `max`. */
+function loadInt(key: string, max: number, fallback = 0): number {
+  const v = parseInt(load(key) ?? '', 10);
+  return Number.isSafeInteger(v) && v >= 0 ? Math.min(v, max) : fallback;
+}
+
+const unlockedLiveries = () => loadInt(LIVERIES_KEY, LIVERIES.length - 1);
+
+/** The equipped livery, if it's actually unlocked; otherwise Classic. */
+function equippedLivery(): LiveryId {
+  const id = load(LIVERY_KEY);
+  const i = LIVERIES.findIndex((l) => l.id === id);
+  return i >= 0 && i <= unlockedLiveries() ? LIVERIES[i].id : 'classic';
+}
+
+function equipLivery(id: LiveryId): void {
+  save(LIVERY_KEY, id);
+  renderer.livery = id;
+}
+renderer.livery = equippedLivery();
 
 // Saved progress is untrusted (other pages on this origin can write it), so clamp it.
 const MAX_LEVEL = 100_000;
@@ -122,6 +156,8 @@ const FAILS_BEFORE_HELP = 3;
 /** Playing the opt-in gentler layout, which tops out at 2 stars. */
 let gentle = false;
 const GENTLE_STAR_CAP = 2;
+/** The current level's bonus challenge, if it has one. */
+let challenge: Challenge | null = null;
 
 // Generate before saving, so a level that fails to build is never persisted and
 // can't brick every reload. On failure, skip ahead a few levels, then fall back to 1.
@@ -154,6 +190,8 @@ function startLevel(requested: number, easier = false): void {
     closeCall: () => showBanner('CLOSE CALL!'),
     bonusSpotUsed: () => setBank(bank() - 1),
   }, bank());
+  challenge = challengeFor(level);
+  el.challenge.classList.toggle('hidden', !challenge);
   el.level.textContent = String(n);
   const pill = el.level.parentElement!;
   pill.classList.toggle('special', !!level.twist);
@@ -205,7 +243,16 @@ function totalStars(): number {
   } catch {
     // storage unavailable — no stars banked
   }
-  return total;
+  return total + loadInt(GIFT_STARS_KEY, 1_000_000);
+}
+
+/** Opens the gift for a completed challenge: the next livery, or bonus stars once the
+ *  collection is complete. */
+function openGift(): Gift {
+  const gift = giftFor(unlockedLiveries());
+  if (gift.kind === 'livery') save(LIVERIES_KEY, String(unlockedLiveries() + 1));
+  else save(GIFT_STARS_KEY, String(loadInt(GIFT_STARS_KEY, 1_000_000) + gift.stars));
+  return gift;
 }
 
 /** Banked bonus +Spots (0 to BANK_CAP). Saves from before the bank existed are converted
@@ -243,6 +290,8 @@ function showWin(reason: string): void {
   const before = totalStars();
   if (stars > best) save(starsKey(levelNum), String(stars));
   if (difficulty) save(diffKey(levelNum), difficulty);
+  const challengeMet = !!challenge && challengeResult(challenge, game.challengeStats(), true).met;
+  const gift = challengeMet ? openGift() : null;
   const after = totalStars();
   const banked = bankAfterWin(bank(), before, after);
   setBank(banked.bank);
@@ -259,6 +308,7 @@ function showWin(reason: string): void {
       ? `✓ Efficient: kept a spot free (at most ${game.peakSpots} of ${game.level.slots} full)`
       : `✗ Efficient: keep one spot free (you filled ${game.peakSpots} of ${game.level.slots})`,
   ];
+  if (challenge) lines.push(`${challengeMet ? '🎯' : '✗'} Bonus challenge: ${challenge.title}`);
   const extras: string[] = [];
   if (stars > best && best > 0) extras.push('New best!');
   else if (best > stars) extras.push(`Your best: ${'★'.repeat(best)}`);
@@ -268,14 +318,53 @@ function showWin(reason: string): void {
 
   const notes: string[] = [];
   if (difficulty) notes.push(`×${difficulty === 'super' ? 3 : 2} stars: +${starPoints(stars, difficulty)} toward your total`);
-  const title = difficulty ? DIFFICULTY_INFO[difficulty].win : game.closeCall ? 'Close Call!' : 'Level Complete!';
+  const title = difficulty
+    ? DIFFICULTY_INFO[difficulty].win
+    : gift
+      ? 'Challenge Complete!'
+      : game.closeCall
+        ? 'Close Call!'
+        : 'Level Complete!';
   if (difficulty) sfx.play('close');
+  if (gift) window.setTimeout(() => sfx.play('unlock'), 900);
+  const newLivery = gift?.kind === 'livery' ? gift.livery : null;
   showModal(title, lines.join('\n'), 'Next Level', () => startLevel(levelNum + 1), {
     stars,
-    tone: difficulty ? 'danger' : undefined,
+    tone: difficulty ? 'danger' : gift ? 'gold' : undefined,
     note: notes.length ? notes.join(' · ') : undefined,
     segs: { before, after, earned: banked.earned, full: banked.full },
+    gift: gift ?? undefined,
+    alt: newLivery
+      ? {
+          label: `Paint my buses: ${newLivery.name}`,
+          action: () => {
+            equipLivery(newLivery.id);
+            toast(`${newLivery.name} equipped`);
+            startLevel(levelNum + 1);
+          },
+        }
+      : undefined,
   });
+}
+
+/** The gift box on the win card: it shakes, pops, and reveals what was inside. */
+function renderGift(gift: Gift): void {
+  const canvas = el.modalGift.querySelector('canvas')!;
+  const label = el.modalGift.querySelector('.label')!;
+  // Re-create the box so its animation replays.
+  const box = el.modalGift.querySelector('.box')!;
+  box.replaceWith(box.cloneNode(true));
+  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  canvas.width = 320 * dpr;
+  canvas.height = 110 * dpr;
+  const preview = new Renderer(canvas.getContext('2d')!);
+  if (gift.kind === 'livery') {
+    preview.drawPreview('blue', gift.livery.id, 320, 110, dpr);
+    label.textContent = `🎁 New paint job: ${gift.livery.name}!`;
+  } else {
+    canvas.getContext('2d')!.clearRect(0, 0, canvas.width, canvas.height);
+    label.textContent = `🎁 +${gift.stars} ★ (every paint job collected!)`;
+  }
 }
 
 /** Progress toward the next bonus +Spot: the stars you already had, then this level's
@@ -328,6 +417,16 @@ function showTwistOrPlay(): void {
     if (level.difficulty) {
       const info = DIFFICULTY_INFO[level.difficulty];
       cards.push({ title: info.title, text: info.text, button: 'Bring it on', tone: 'danger' });
+    }
+    if (challenge) {
+      const next = giftFor(unlockedLiveries());
+      const prize = next.kind === 'livery' ? `the ${next.livery.name} paint job` : `${next.stars} bonus ★`;
+      cards.push({
+        title: `🎯 Bonus Challenge: ${challenge.title}`,
+        text: `${challenge.text}\nPull it off to open a 🎁 gift: ${prize}.`,
+        button: 'Challenge accepted',
+        tone: 'gold',
+      });
     }
   }
   if (level.buses.some((b) => b.lock >= 0) && load(SEEN_LOCKS_KEY) !== '1') {
@@ -388,6 +487,8 @@ function showModal(
     segs?: { before: number; after: number; earned: boolean; full: boolean };
     /** A secondary, quieter choice under the main button. */
     alt?: { label: string; action: () => void };
+    /** A gift box that opens on the card. */
+    gift?: Gift;
   } = {},
 ): void {
   el.modalCard.classList.toggle('special', opts.tone === 'gold');
@@ -403,6 +504,8 @@ function showModal(
   }
   el.modalSegs.classList.toggle('hidden', !opts.segs);
   if (opts.segs) renderSegs(opts.segs.before, opts.segs.after, opts.segs.earned, opts.segs.full);
+  el.modalGift.classList.toggle('hidden', !opts.gift);
+  if (opts.gift) renderGift(opts.gift);
   el.modalAlt.classList.toggle('hidden', !opts.alt);
   el.modalAlt.textContent = opts.alt?.label ?? '';
   altAction = opts.alt?.action ?? null;
@@ -508,7 +611,62 @@ function syncHud(): void {
   el.vip.disabled = game.boosters.vip === 0;
   el.slot.disabled = !game.canUseSlot();
   el.sound.textContent = sfx.muted ? '🔇' : '🔊';
+  if (challenge) {
+    const r = challengeResult(challenge, game.challengeStats(), game.status === 'won');
+    el.challenge.querySelector('.label')!.textContent = r.label;
+    el.challenge.classList.toggle('done', r.met);
+    el.challenge.classList.toggle('failed', r.failed);
+  }
 }
+
+/** Garage: preview every paint job; unlocked ones can be equipped, locked ones show which
+ *  gift unlocks them, so the next reward is always in sight. */
+let pausedBeforeGarage = false;
+function openGarage(): void {
+  pausedBeforeGarage = paused;
+  paused = true;
+  renderGarage();
+  el.garage.classList.remove('hidden');
+}
+
+function renderGarage(): void {
+  const unlocked = unlockedLiveries();
+  const current = equippedLivery();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  const sample = ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink', 'cyan', 'white'] as const;
+  el.garageGrid.replaceChildren(
+    ...LIVERIES.map((livery, i) => {
+      const tile = document.createElement('button');
+      const locked = i > unlocked;
+      const isNext = i === unlocked + 1;
+      tile.className = `tile${locked ? ' locked' : ''}${isNext ? ' next' : ''}${livery.id === current ? ' selected' : ''}`;
+      const c = document.createElement('canvas');
+      c.width = 170 * dpr;
+      c.height = 64 * dpr;
+      new Renderer(c.getContext('2d')!).drawPreview(sample[i % sample.length], livery.id, 170, 64, dpr);
+      const name = document.createElement('span');
+      name.textContent = locked ? (i === unlocked + 1 ? `🔒 Next gift: ${livery.name}` : `🔒 ${livery.name}`) : livery.name;
+      tile.append(c, name);
+      tile.setAttribute('aria-label', locked ? `${livery.name}, locked` : `Equip ${livery.name}`);
+      tile.disabled = locked;
+      tile.addEventListener('click', () => {
+        sfx.play('tap');
+        equipLivery(livery.id);
+        renderGarage();
+      });
+      return tile;
+    }),
+  );
+}
+
+el.garageBtn.addEventListener('click', () => {
+  sfx.unlock();
+  openGarage();
+});
+el.garageClose.addEventListener('click', () => {
+  el.garage.classList.add('hidden');
+  paused = pausedBeforeGarage;
+});
 
 let last = performance.now();
 function frame(now: number): void {

@@ -18,6 +18,7 @@ import {
   slotCenterX,
   W,
 } from './layout';
+import type { ChallengeStats } from './challenges';
 import { boardTarget, capacityFor } from './level';
 import { personPos } from './queuePath';
 import type { BusSpec, ColorId, Dir, LevelData } from './types';
@@ -196,6 +197,10 @@ export class Game {
   closeCall = false;
   /** Most regular (non-VIP) spots taken at once; fewer means more efficient play. */
   peakSpots = 0;
+  /** Seconds of play so far (stops when the level ends). */
+  elapsed = 0;
+  /** When each bus filled up, for the Hat Trick challenge. */
+  fullTimes: number[] = [];
   private slowMo = 0;
   private boardTimer = 0;
   private stuckNotified = false;
@@ -255,7 +260,19 @@ export class Game {
     return this.vipUsed + this.slotsUsed;
   }
 
-  private get vipUsed(): number {
+  challengeStats(): ChallengeStats {
+    return {
+      peakSpots: this.peakSpots,
+      slots: this.level.slots,
+      vipUsed: this.vipUsed,
+      boostersUsed: this.boostersUsed,
+      fullTimes: this.fullTimes,
+      elapsed: this.elapsed,
+      busCount: this.buses.length,
+    };
+  }
+
+  get vipUsed(): number {
     return START_BOOSTERS.vip - this.boosters.vip;
   }
 
@@ -542,6 +559,7 @@ export class Game {
   // ---- simulation --------------------------------------------------------
 
   update(dt: number): void {
+    if (this.status === 'playing') this.elapsed += dt;
     if (this.slowMo > 0) {
       this.slowMo -= dt;
       dt *= SLOW_MO_RATE;
@@ -586,6 +604,7 @@ export class Game {
         const bus = f.bus;
         bus.filled++;
         bus.countPopT = 0;
+        if (bus.filled === bus.capacity) this.fullTimes.push(this.elapsed);
         if (bus.filled === bus.capacity) {
           // Hold a beat so the full moment lands before it drives off.
           bus.leaveDelay = 0.35;
