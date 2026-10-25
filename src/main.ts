@@ -53,12 +53,12 @@ const TWIST_INFO: Record<Twist, { title: string; text: string }> = {
 const DIFFICULTY_INFO: Record<Difficulty, { title: string; text: string; win: string }> = {
   hard: {
     title: '⚠ Hard Level',
-    text: 'Our test bot needed both boosters to get through this one. Your first booster is free, and stars count ×2.',
+    text: 'Even Big Gus, our veteran driver, needed both boosters to clear this lot. Your first booster is free, and stars count ×2.',
     win: 'Hard Level Beaten!',
   },
   super: {
     title: '☠ Super Hard',
-    text: 'Our test bot couldn’t beat this one, even with both boosters. Boosters are free, and stars count ×3.',
+    text: 'Big Gus, our veteran driver, has never cleared this lot, not even with both boosters. Boosters are free, and stars count ×3. Show Gus how it’s done!',
     win: 'Super Hard Beaten!',
   },
 };
