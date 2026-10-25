@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { generateLevel, levelConfig, START_SLOTS } from '../src/level';
-import { starsFor } from '../src/stars';
+import { bonusSpots, STARS_PER_BONUS, starsFor } from '../src/stars';
+
+describe('bonus spots', () => {
+  it('banks one per 10 stars, minus the ones spent', () => {
+    expect(STARS_PER_BONUS).toBe(10);
+    expect(bonusSpots(9, 0)).toBe(0);
+    expect(bonusSpots(10, 0)).toBe(1);
+    expect(bonusSpots(29, 0)).toBe(2);
+    expect(bonusSpots(29, 1)).toBe(1);
+    expect(bonusSpots(29, 5)).toBe(0);
+  });
+});
 
 describe('star rating', () => {
   it('rates by time left', () => {

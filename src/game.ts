@@ -88,6 +88,8 @@ export interface GameEvents {
   end(won: boolean, reason: string): void;
   /** The last passenger boarded after a near-loss. */
   closeCall(): void;
+  /** A banked bonus +Spot (beyond the free one) was spent. */
+  bonusSpotUsed(): void;
 }
 
 const DRIVE_SPEED = 950;
@@ -176,8 +178,11 @@ export class Game {
   constructor(
     level: LevelData,
     private events: GameEvents,
+    /** Banked bonus +Spots the player can spend on top of the free one. */
+    private bonusSlots = 0,
   ) {
     this.level = level;
+    this.boosters.slot += bonusSlots;
     this.queue = [...level.queue];
     this.time = level.time;
     this.slots = Array.from({ length: SLOT_COUNT }, (_, i) => ({
@@ -217,7 +222,15 @@ export class Game {
   }
 
   get boostersUsed(): number {
-    return START_BOOSTERS.vip - this.boosters.vip + (START_BOOSTERS.slot - this.boosters.slot);
+    return this.vipUsed + this.slotsUsed;
+  }
+
+  private get vipUsed(): number {
+    return START_BOOSTERS.vip - this.boosters.vip;
+  }
+
+  private get slotsUsed(): number {
+    return START_BOOSTERS.slot + this.bonusSlots - this.boosters.slot;
   }
 
   get lotBuses(): Bus[] {
@@ -314,6 +327,8 @@ export class Game {
     const slot = this.slots.find((s) => s.locked)!;
     slot.locked = false;
     this.boosters.slot--;
+    // The free +Spot goes first; anything past it comes out of the bank.
+    if (this.slotsUsed > START_BOOSTERS.slot) this.events.bonusSpotUsed();
     this.stuckNotified = false;
     this.events.sound('booster');
   }

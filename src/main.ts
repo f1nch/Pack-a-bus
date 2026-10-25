@@ -4,13 +4,14 @@ import { Game } from './game';
 import { H, W } from './layout';
 import { generateLevel, twistFor } from './level';
 import { Renderer } from './render';
-import { starsFor } from './stars';
+import { bonusSpots, STARS_PER_BONUS, starsFor } from './stars';
 import type { LevelData, Twist } from './types';
 
 const LEVEL_KEY = 'pack-a-bus.level';
 const SOUND_KEY = 'pack-a-bus.muted';
 const starsKey = (n: number) => `pack-a-bus.stars.${n}`;
 const SEEN_LOCKS_KEY = 'pack-a-bus.seen.locks';
+const BONUS_SPENT_KEY = 'pack-a-bus.bonus-spent';
 
 const TWIST_INFO: Record<Twist, { title: string; text: string }> = {
   mystery: {
@@ -64,6 +65,7 @@ const el = {
   modalTitle: $('#modal-title'),
   modalStars: $('#modal-stars'),
   modalText: $('#modal-text'),
+  modalNote: $('#modal-note'),
   modalBtn: $<HTMLButtonElement>('#modal-btn'),
 };
 
@@ -106,7 +108,8 @@ function startLevel(requested: number): void {
       else showModal('Level Failed', reason, 'Try Again', () => startLevel(levelNum));
     },
     closeCall: () => showBanner('CLOSE CALL!'),
-  });
+    bonusSpotUsed: () => save(BONUS_SPENT_KEY, String(bonusSpent() + 1)),
+  }, bonusSpots(totalStars(), bonusSpent()));
   el.level.textContent = String(n);
   el.level.parentElement!.classList.toggle('special', !!level.twist);
   el.vip.classList.remove('pulse');
@@ -120,12 +123,34 @@ function bestStars(n: number): number {
   return v >= 1 && v <= 3 ? v : 0;
 }
 
+/** Sum of the best stars on every level won so far. */
+function totalStars(): number {
+  let total = 0;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const m = /^pack-a-bus\.stars\.(\d+)$/.exec(localStorage.key(i) ?? '');
+      if (m) total += bestStars(Number(m[1]));
+    }
+  } catch {
+    // storage unavailable — no stars banked
+  }
+  return total;
+}
+
+function bonusSpent(): number {
+  const v = parseInt(load(BONUS_SPENT_KEY) ?? '0', 10);
+  return Number.isSafeInteger(v) && v > 0 ? v : 0;
+}
+
 function showWin(reason: string): void {
   const stars = starsFor(game.time, game.level.time, game.boostersUsed);
   const best = bestStars(levelNum);
+  const before = totalStars();
   if (stars > best) save(starsKey(levelNum), String(stars));
+  const after = totalStars();
 
   const lines = [reason];
+  const earned = Math.floor(after / STARS_PER_BONUS) > Math.floor(before / STARS_PER_BONUS);
   if (stars > best && best > 0) lines.push('New best!');
   else if (best > stars) lines.push(`Your best: ${'★'.repeat(best)}`);
   if (stars < 3) {
@@ -133,7 +158,10 @@ function showWin(reason: string): void {
   }
   if (twistFor(levelNum + 1)) lines.push('Next up: a special level!');
   const title = game.closeCall ? 'Close Call!' : 'Level Complete!';
-  showModal(title, lines.join(' '), 'Next Level', () => startLevel(levelNum + 1), { stars });
+  showModal(title, lines.join(' '), 'Next Level', () => startLevel(levelNum + 1), {
+    stars,
+    note: earned ? `🎁 ${after} stars: bonus +Spot earned!` : undefined,
+  });
 }
 
 /** Special levels open with a card explaining their twist, and the first level
@@ -183,9 +211,11 @@ function showModal(
   text: string,
   button: string,
   action: () => void,
-  opts: { stars?: number; special?: boolean } = {},
+  opts: { stars?: number; special?: boolean; note?: string } = {},
 ): void {
   el.modalCard.classList.toggle('special', !!opts.special);
+  el.modalNote.textContent = opts.note ?? '';
+  el.modalNote.classList.toggle('hidden', !opts.note);
   el.modalStars.classList.toggle('hidden', opts.stars === undefined);
   if (opts.stars !== undefined) {
     // Re-create the stars so their pop-in animation replays every time.
@@ -283,11 +313,21 @@ function frame(now: number): void {
   requestAnimationFrame(frame);
 }
 
+/** Star total, banked bonus spots, and how far off the next one is. */
+function starSummary(): string {
+  const total = totalStars();
+  const banked = bonusSpots(total, bonusSpent());
+  const toNext = STARS_PER_BONUS - (total % STARS_PER_BONUS);
+  const bank = banked > 0 ? ` · ${banked} bonus +Spot${banked > 1 ? 's' : ''} banked` : '';
+  return `★ ${total} stars · ${toNext} more for a bonus +Spot${bank}`;
+}
+
 startLevel(levelNum);
 showModal(
   'Pack-a-Bus',
-  'Tap a bus to drive it out of the lot. It parks up top and picks up passengers of its color. Don\'t fill every spot with the wrong colors!',
+  "Tap a bus to drive it out of the lot. It parks up top and picks up passengers of its color. Don't fill every spot with the wrong colors!",
   levelNum > 1 ? `Continue Level ${levelNum}` : 'Play',
   showTwistOrPlay,
+  { note: starSummary() },
 );
 requestAnimationFrame(frame);

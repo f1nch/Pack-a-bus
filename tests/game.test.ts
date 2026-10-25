@@ -4,7 +4,14 @@ import { CELL, LOT_X, LOT_Y } from '../src/layout';
 import { generateLevel } from '../src/level';
 import { starsFor } from '../src/stars';
 
-const quiet = { sound: () => {}, toast: () => {}, stuck: () => {}, end: () => {}, closeCall: () => {} };
+const quiet = {
+  sound: () => {},
+  toast: () => {},
+  stuck: () => {},
+  end: () => {},
+  closeCall: () => {},
+  bonusSpotUsed: () => {},
+};
 
 /** Plays a level's known solution through the real game rules. */
 function playSolution(n: number, useBooster = false, onStep?: (game: Game) => void) {
@@ -77,6 +84,23 @@ describe('locked buses', () => {
     expect(game.isLocked(locked)).toBe(false);
     game.tap(LOT_X + locked.col * CELL + CELL / 2, LOT_Y + locked.row * CELL + CELL / 2);
     expect(locked.state).toBe('moving');
+  });
+});
+
+describe('bonus spots', () => {
+  it('open the second locked spot after the free +Spot, and report each use', () => {
+    let bonusUsed = 0;
+    const game = new Game(generateLevel(1), { ...quiet, bonusSpotUsed: () => bonusUsed++ }, 2);
+    expect(game.boosters.slot).toBe(3);
+    const lockedBefore = game.slots.filter((s) => s.locked).length;
+    game.useSlotBooster();
+    expect(bonusUsed).toBe(0);
+    game.useSlotBooster();
+    expect(bonusUsed).toBe(1);
+    expect(game.slots.filter((s) => s.locked).length).toBe(lockedBefore - 2);
+    // Both normal locked spots are open now, so the last bonus stays banked.
+    expect(game.canUseSlot()).toBe(false);
+    expect(game.boostersUsed).toBe(2);
   });
 });
 
