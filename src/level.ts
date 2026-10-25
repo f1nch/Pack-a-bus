@@ -1,7 +1,7 @@
 import { buildOccupancy, cellsOf, DIRS, isHorizontal, pathCells, probePath } from './grid';
 import { COLOR_ORDER } from './palette';
 import { mulberry32, pick, randInt, shuffle, type Rng } from './rng';
-import type { BusSpec, ColorId, LevelData } from './types';
+import type { BusSpec, ColorId, LevelData, Twist } from './types';
 
 export const COLS = 13;
 export const ROWS = 10;
@@ -16,16 +16,30 @@ export interface LevelConfig {
   genSlots: number;
   mysteryChance: number;
   time: number;
+  slots: number;
+  twist: Twist | null;
+}
+
+const TWISTS: Twist[] = ['mystery', 'rush', 'tight'];
+
+/** Every 10th level is special; the twist rotates so they don't repeat back to back. */
+export function twistFor(level: number): Twist | null {
+  return level % 10 === 0 ? TWISTS[(level / 10 - 1) % TWISTS.length] : null;
 }
 
 export function levelConfig(level: number): LevelConfig {
   const busCount = Math.min(38, 14 + level * 2);
+  const twist = twistFor(level);
+  // Twists never touch the generated solution (it uses genSlots, at most 4), so
+  // special levels stay as solvable as normal ones.
   return {
     busCount,
     colors: Math.min(COLOR_ORDER.length, 3 + Math.floor((level - 1) / 2)),
     genSlots: level <= 2 ? 4 : level <= 6 ? 3 : 2,
-    mysteryChance: level < 4 ? 0 : Math.min(0.3, 0.06 * (level - 3)),
-    time: 30 + busCount * 4,
+    mysteryChance: twist === 'mystery' ? 0.6 : level < 4 ? 0 : Math.min(0.3, 0.06 * (level - 3)),
+    time: Math.round((30 + busCount * 4) * (twist === 'rush' ? 0.7 : 1)),
+    slots: twist === 'tight' ? START_SLOTS - 1 : START_SLOTS,
+    twist,
   };
 }
 
@@ -147,11 +161,12 @@ export function generateLevel(level: number): LevelData {
     const order = exitOrder(rng, buses);
     const data: LevelData = {
       level,
+      twist: cfg.twist,
       cols: COLS,
       rows: ROWS,
       buses,
       queue: buildQueue(rng, order, cfg.genSlots),
-      slots: START_SLOTS,
+      slots: cfg.slots,
       time: cfg.time,
       solution: order.map((b) => b.id),
     };

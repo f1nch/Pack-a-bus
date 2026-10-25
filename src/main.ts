@@ -2,12 +2,23 @@ import './style.css';
 import { Sfx } from './audio';
 import { Game } from './game';
 import { H, W } from './layout';
-import { generateLevel } from './level';
+import { generateLevel, twistFor } from './level';
 import { Renderer } from './render';
-import type { LevelData } from './types';
+import { starsFor } from './stars';
+import type { LevelData, Twist } from './types';
 
 const LEVEL_KEY = 'pack-a-bus.level';
 const SOUND_KEY = 'pack-a-bus.muted';
+const starsKey = (n: number) => `pack-a-bus.stars.${n}`;
+
+const TWIST_INFO: Record<Twist, { title: string; text: string }> = {
+  mystery: {
+    title: 'Mystery Mayhem',
+    text: 'Most buses hide their color until their way out is clear.',
+  },
+  rush: { title: 'Rush Hour', text: 'Less time on the clock. Move fast!' },
+  tight: { title: 'Tight Squeeze', text: 'One parking spot is closed. Plan every move.' },
+};
 
 function load(key: string): string | null {
   try {
@@ -47,7 +58,9 @@ const el = {
   restart: $<HTMLButtonElement>('#btn-restart'),
   toast: $('#toast'),
   modal: $('#modal'),
+  modalCard: $('#modal .card'),
   modalTitle: $('#modal-title'),
+  modalStars: $('#modal-stars'),
   modalText: $('#modal-text'),
   modalBtn: $<HTMLButtonElement>('#modal-btn'),
 };
@@ -87,17 +100,47 @@ function startLevel(requested: number): void {
       el.slot.classList.toggle('pulse', game.canUseSlot());
     },
     end: (won, reason) => {
-      if (won) {
-        showModal('Level Complete!', reason, 'Next Level', () => startLevel(levelNum + 1));
-      } else {
-        showModal('Level Failed', reason, 'Try Again', () => startLevel(levelNum));
-      }
+      if (won) showWin(reason);
+      else showModal('Level Failed', reason, 'Try Again', () => startLevel(levelNum));
     },
   });
   el.level.textContent = String(n);
+  el.level.parentElement!.classList.toggle('special', !!level.twist);
   el.vip.classList.remove('pulse');
   el.slot.classList.remove('pulse');
-  hideModal();
+  showTwistOrPlay();
+}
+
+/** Best stars saved for a level, 0 if never won (or the saved value is junk). */
+function bestStars(n: number): number {
+  const v = parseInt(load(starsKey(n)) ?? '', 10);
+  return v >= 1 && v <= 3 ? v : 0;
+}
+
+function showWin(reason: string): void {
+  const stars = starsFor(game.time, game.level.time, game.boostersUsed);
+  const best = bestStars(levelNum);
+  if (stars > best) save(starsKey(levelNum), String(stars));
+
+  const lines = [reason];
+  if (stars > best && best > 0) lines.push('New best!');
+  else if (best > stars) lines.push(`Your best: ${'★'.repeat(best)}`);
+  if (stars < 3) {
+    lines.push(game.boostersUsed > 0 ? 'Skip the boosters for more stars.' : 'Finish faster for more stars.');
+  }
+  if (twistFor(levelNum + 1)) lines.push('Next up: a special level!');
+  showModal('Level Complete!', lines.join(' '), 'Next Level', () => startLevel(levelNum + 1), { stars });
+}
+
+/** Special levels open with a card explaining their twist. */
+function showTwistOrPlay(): void {
+  const twist = game.level.twist;
+  if (!twist) {
+    hideModal();
+    return;
+  }
+  const info = TWIST_INFO[twist];
+  showModal(`★ ${info.title} ★`, `Special level! ${info.text}`, 'Go!', hideModal, { special: true });
 }
 
 let toastTimer = 0;
@@ -108,7 +151,27 @@ function toast(msg: string): void {
   toastTimer = window.setTimeout(() => el.toast.classList.remove('show'), 1600);
 }
 
-function showModal(title: string, text: string, button: string, action: () => void): void {
+function showModal(
+  title: string,
+  text: string,
+  button: string,
+  action: () => void,
+  opts: { stars?: number; special?: boolean } = {},
+): void {
+  el.modalCard.classList.toggle('special', !!opts.special);
+  el.modalStars.classList.toggle('hidden', opts.stars === undefined);
+  if (opts.stars !== undefined) {
+    // Re-create the stars so their pop-in animation replays every time.
+    el.modalStars.setAttribute('aria-label', `${opts.stars} of 3 stars`);
+    el.modalStars.replaceChildren(
+      ...[0, 1, 2].map((i) => {
+        const s = document.createElement('span');
+        s.textContent = '★';
+        s.classList.toggle('on', i < opts.stars!);
+        return s;
+      }),
+    );
+  }
   el.modalTitle.textContent = title;
   el.modalText.textContent = text;
   el.modalBtn.textContent = button;
@@ -198,6 +261,6 @@ showModal(
   'Pack-a-Bus',
   'Tap a bus to drive it out of the lot. It parks up top and picks up passengers of its color. Don\'t fill every spot with the wrong colors!',
   levelNum > 1 ? `Continue Level ${levelNum}` : 'Play',
-  hideModal,
+  showTwistOrPlay,
 );
 requestAnimationFrame(frame);

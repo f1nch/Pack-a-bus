@@ -22,8 +22,12 @@ export interface BusSpec {
   mystery: boolean;
 }
 
+/** Every 10th level gets one of these twists. */
+export type Twist = 'mystery' | 'rush' | 'tight';
+
 export interface LevelData {
   level: number;
+  twist: Twist | null;
   cols: number;
   rows: number;
   buses: BusSpec[];

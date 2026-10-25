@@ -90,6 +90,7 @@ const DRIVE_SPEED = 950;
 const LIFT_SPEED = 650;
 const BOARD_INTERVAL = 0.045;
 const FLY_TIME = 0.2;
+const START_BOOSTERS = { vip: 1, slot: 1 };
 
 export const dirAngle = (d: Dir): number =>
   d === 'right' ? 0 : d === 'down' ? Math.PI / 2 : d === 'left' ? Math.PI : -Math.PI / 2;
@@ -154,7 +155,7 @@ export class Game {
   flyers: Flyer[] = [];
   time: number;
   status: 'playing' | 'won' | 'lost' = 'playing';
-  boosters = { vip: 1, slot: 1 };
+  boosters = { ...START_BOOSTERS };
   vipMode = false;
   private boardTimer = 0;
   private stuckNotified = false;
@@ -201,6 +202,10 @@ export class Game {
 
   get remaining(): number {
     return this.queue.length - this.qHead;
+  }
+
+  get boostersUsed(): number {
+    return START_BOOSTERS.vip - this.boosters.vip + (START_BOOSTERS.slot - this.boosters.slot);
   }
 
   get lotBuses(): Bus[] {

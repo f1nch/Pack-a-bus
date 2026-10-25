@@ -237,6 +237,52 @@ button.icon {
   color: #4a5270;
 }
 
+.card.special {
+  background: linear-gradient(#fff6d8, #fff);
+  border: 6px solid var(--accent);
+}
+
+.card.special h1 {
+  color: #b77a00;
+}
+
+.pill.special {
+  background: linear-gradient(#ffd25a, var(--accent));
+  color: var(--accent-ink);
+}
+
+.stars {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  margin: 0 0 20px;
+  font-size: 84px;
+  line-height: 1;
+}
+
+.stars.hidden {
+  display: none;
+}
+
+.stars span {
+  color: #d9dce6;
+  animation: star-pop 0.35s ease-out backwards;
+}
+
+.stars span.on {
+  color: var(--accent);
+  text-shadow: 0 4px 0 #a87510;
+}
+
+.stars span:nth-child(2) {
+  animation-delay: 0.15s;
+  transform: translateY(-14px);
+}
+
+.stars span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
 #modal-btn {
   min-width: 300px;
   height: 84px;
@@ -246,6 +292,17 @@ button.icon {
   font-size: 34px;
   font-weight: 800;
   box-shadow: 0 7px 0 #247a2c;
+}
+
+@keyframes star-pop {
+  from {
+    opacity: 0;
+    scale: 2.2;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
 }
 
 @keyframes throb {
