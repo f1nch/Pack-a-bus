@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { buildGentlerLevel, buildGradedLevel, gradeLevel } from '../src/grade';
 import { levelConfig, simulate } from '../src/level';
 import { COLOR_ORDER, SYMBOLS } from '../src/palette';
-import { starsFor } from '../src/stars';
 
 describe('color symbols', () => {
   it('gives every color its own shape', () => {
@@ -37,9 +36,3 @@ describe('gentler layout', () => {
   });
 });
 
-describe('star cap', () => {
-  it('caps stars when asked', () => {
-    expect(starsFor(90, 100, 0, 0, 2)).toBe(2);
-    expect(starsFor(10, 100, 0, 0, 2)).toBe(1);
-  });
-});

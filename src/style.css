@@ -273,6 +273,7 @@ button.icon {
 }
 
 .card p {
+  white-space: pre-line;
   margin: 0 0 32px;
   font-size: 26px;
   line-height: 1.4;

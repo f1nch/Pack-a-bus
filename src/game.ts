@@ -194,6 +194,8 @@ export class Game {
   vipMode = false;
   /** Set when the player finished with the clock nearly out. */
   closeCall = false;
+  /** Most regular (non-VIP) spots taken at once; fewer means more efficient play. */
+  peakSpots = 0;
   private slowMo = 0;
   private boardTimer = 0;
   private stuckNotified = false;
@@ -398,6 +400,8 @@ export class Game {
 
   private driveToSlot(bus: Bus, slotIdx: number): void {
     this.slots[slotIdx].bus = bus;
+    const taken = this.slots.filter((s) => !s.vip && s.bus).length;
+    this.peakSpots = Math.max(this.peakSpots, taken);
     bus.slot = slotIdx;
     bus.state = 'moving';
     bus.bumpT = -1;

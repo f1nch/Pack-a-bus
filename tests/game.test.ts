@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { Game } from '../src/game';
 import { CELL, LOT_X, LOT_Y } from '../src/layout';
-import { generateLevel } from '../src/level';
-import { starsFor } from '../src/stars';
+import { generateLevel, levelConfig } from '../src/level';
+import { rateLevel, spotGoal } from '../src/stars';
 
 const quiet = {
   sound: () => {},
@@ -13,8 +13,11 @@ const quiet = {
   bonusSpotUsed: () => {},
 };
 
-/** Plays a level's known solution through the real game rules. */
-function playSolution(n: number, useBooster = false, onStep?: (game: Game) => void) {
+const parkedNow = (game: Game) => game.slots.filter((s) => !s.vip && s.bus).length;
+
+/** Plays a level's known solution through the real game rules. `patient` waits for a
+ *  spot to clear instead of parking as many buses as possible, like a careful player. */
+function playSolution(n: number, useBooster = false, onStep?: (game: Game) => void, patient = false) {
   const level = generateLevel(n);
   let result: { won: boolean; reason: string } | null = null;
   let full = false;
@@ -29,7 +32,8 @@ function playSolution(n: number, useBooster = false, onStep?: (game: Game) => vo
   const byId = new Map(level.buses.map((b) => [b.id, b]));
   let next = 0;
   for (let step = 0; step < 20000 && !result; step++) {
-    if (next < level.solution.length && step % 5 === 0) {
+    const waiting = patient && parkedNow(game) >= levelConfig(n).genSlots;
+    if (next < level.solution.length && step % 5 === 0 && !waiting) {
       const b = byId.get(level.solution[next])!;
       full = false;
       game.tap(LOT_X + b.col * CELL + CELL / 2, LOT_Y + b.row * CELL + CELL / 2);
@@ -41,19 +45,36 @@ function playSolution(n: number, useBooster = false, onStep?: (game: Game) => vo
   return { game, closeCalls, result: result as { won: boolean; reason: string } | null };
 }
 
+const rate = (game: Game) =>
+  rateLevel({
+    boostersUsed: game.boostersUsed,
+    free: 0,
+    peakSpots: game.peakSpots,
+    spotGoal: spotGoal(game.level.slots),
+  });
+
 describe('game flow', () => {
-  it('playing the solution wins with 3 stars and no boosters', () => {
-    const { game, result } = playSolution(1);
-    expect(result?.won).toBe(true);
-    expect(game.boostersUsed).toBe(0);
-    expect(starsFor(game.time, game.level.time, game.boostersUsed)).toBe(3);
+  it('playing the solution patiently wins with 3 stars and no boosters', () => {
+    for (const n of [1, 7, 15]) {
+      const { game, result } = playSolution(n, false, undefined, true);
+      expect(result?.won).toBe(true);
+      expect(game.boostersUsed).toBe(0);
+      expect(game.peakSpots).toBeLessThanOrEqual(levelConfig(n).genSlots);
+      expect(rate(game).stars).toBe(3);
+    }
+  });
+
+  it('tracks the most regular spots full at once', () => {
+    const { game } = playSolution(15);
+    expect(game.peakSpots).toBeGreaterThan(levelConfig(15).genSlots);
+    expect(rate(game).efficient).toBe(false);
   });
 
   it('counts boosters used', () => {
     const { game, result } = playSolution(1, true);
     expect(result?.won).toBe(true);
     expect(game.boostersUsed).toBe(1);
-    expect(starsFor(game.time, game.level.time, game.boostersUsed)).toBe(2);
+    expect(rate(game).clean).toBe(false);
   });
 
   for (const n of [10, 13, 19, 20, 29, 30, 44]) {

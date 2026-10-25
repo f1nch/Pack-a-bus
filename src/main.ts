@@ -5,7 +5,16 @@ import { H, W } from './layout';
 import { buildGentlerLevel, buildGradedLevel } from './grade';
 import { twistFor } from './level';
 import { Renderer } from './render';
-import { bonusSpots, freeBoosters, starPoints, STARS_PER_BONUS, starsFor } from './stars';
+import {
+  BANK_CAP,
+  bankAfterWin,
+  bonusSpots,
+  freeBoosters,
+  rateLevel,
+  spotGoal,
+  starPoints,
+  STARS_PER_BONUS,
+} from './stars';
 import type { Difficulty, LevelData, Twist } from './types';
 
 const LEVEL_KEY = 'pack-a-bus.level';
@@ -15,7 +24,9 @@ const starsKey = (n: number) => `pack-a-bus.stars.${n}`;
 /** Difficulty flag of a won level, so its stars keep their multiplier in the total. */
 const diffKey = (n: number) => `pack-a-bus.diff.${n}`;
 const SEEN_LOCKS_KEY = 'pack-a-bus.seen.locks';
+/** Legacy: older saves counted spent bonus +Spots instead of keeping a bank. */
 const BONUS_SPENT_KEY = 'pack-a-bus.bonus-spent';
+const BANK_KEY = 'pack-a-bus.bank';
 
 const TWIST_INFO: Record<Twist, { title: string; text: string }> = {
   mystery: {
@@ -141,8 +152,8 @@ function startLevel(requested: number, easier = false): void {
     },
     end: (won, reason) => (won ? showWin(reason) : showFail(reason)),
     closeCall: () => showBanner('CLOSE CALL!'),
-    bonusSpotUsed: () => save(BONUS_SPENT_KEY, String(bonusSpent() + 1)),
-  }, bonusSpots(totalStars(), bonusSpent()));
+    bonusSpotUsed: () => setBank(bank() - 1),
+  }, bank());
   el.level.textContent = String(n);
   const pill = el.level.parentElement!;
   pill.classList.toggle('special', !!level.twist);
@@ -197,51 +208,85 @@ function totalStars(): number {
   return total;
 }
 
-function bonusSpent(): number {
-  const v = parseInt(load(BONUS_SPENT_KEY) ?? '0', 10);
-  return Number.isSafeInteger(v) && v > 0 ? v : 0;
+/** Banked bonus +Spots (0 to BANK_CAP). Saves from before the bank existed are converted
+ *  once from their star total and spent count. */
+function bank(): number {
+  const raw = load(BANK_KEY);
+  if (raw === null) {
+    const spent = parseInt(load(BONUS_SPENT_KEY) ?? '0', 10);
+    const migrated = bonusSpots(totalStars(), Number.isSafeInteger(spent) && spent > 0 ? spent : 0);
+    setBank(migrated);
+    return migrated;
+  }
+  const v = parseInt(raw, 10);
+  return Number.isSafeInteger(v) ? Math.max(0, Math.min(BANK_CAP, v)) : 0;
+}
+
+function setBank(n: number): void {
+  save(BANK_KEY, String(Math.max(0, Math.min(BANK_CAP, n))));
 }
 
 function showWin(reason: string): void {
   const difficulty = game.level.difficulty;
   const free = freeBoosters(difficulty);
-  const stars = starsFor(game.time, game.level.time, game.boostersUsed, free, gentle ? GENTLE_STAR_CAP : 3);
+  const goal = spotGoal(game.level.slots);
+  const rating = rateLevel({
+    boostersUsed: game.boostersUsed,
+    free,
+    peakSpots: game.peakSpots,
+    spotGoal: goal,
+    cap: gentle ? GENTLE_STAR_CAP : 3,
+  });
+  const stars = rating.stars;
   const best = bestStars(levelNum);
   failsOnLevel = 0;
   const before = totalStars();
   if (stars > best) save(starsKey(levelNum), String(stars));
   if (difficulty) save(diffKey(levelNum), difficulty);
   const after = totalStars();
+  const banked = bankAfterWin(bank(), before, after);
+  setBank(banked.bank);
 
-  const lines = [reason];
-  const earned = Math.floor(after / STARS_PER_BONUS) > Math.floor(before / STARS_PER_BONUS);
-  if (stars > best && best > 0) lines.push('New best!');
-  else if (best > stars) lines.push(`Your best: ${'★'.repeat(best)}`);
-  if (gentle) lines.push(`Gentler layout: replay the normal one for 3★.`);
-  else if (stars < 3) {
-    lines.push(game.boostersUsed > free ? 'Skip the boosters for more stars.' : 'Finish faster for more stars.');
-  }
-  if (twistFor(levelNum + 1)) lines.push('Next up: a special level!');
+  // A checklist of the three stars, so it's clear what to do differently next time.
+  const allowed = free > 0 ? `${free} free on this level` : 'none allowed';
+  const lines = [
+    reason,
+    '✓ Cleared',
+    rating.clean
+      ? `✓ Clean: no extra boosters`
+      : `✗ Clean: used ${game.boostersUsed} booster${game.boostersUsed > 1 ? 's' : ''} (${allowed})`,
+    rating.efficient
+      ? `✓ Efficient: kept a spot free (at most ${game.peakSpots} of ${game.level.slots} full)`
+      : `✗ Efficient: keep one spot free (you filled ${game.peakSpots} of ${game.level.slots})`,
+  ];
+  const extras: string[] = [];
+  if (stars > best && best > 0) extras.push('New best!');
+  else if (best > stars) extras.push(`Your best: ${'★'.repeat(best)}`);
+  if (gentle) extras.push(`Gentler layout: replay the normal one for 3★.`);
+  if (twistFor(levelNum + 1)) extras.push('Next up: a special level!');
+  if (extras.length) lines.push(extras.join(' '));
 
   const notes: string[] = [];
   if (difficulty) notes.push(`×${difficulty === 'super' ? 3 : 2} stars: +${starPoints(stars, difficulty)} toward your total`);
   const title = difficulty ? DIFFICULTY_INFO[difficulty].win : game.closeCall ? 'Close Call!' : 'Level Complete!';
   if (difficulty) sfx.play('close');
-  showModal(title, lines.join(' '), 'Next Level', () => startLevel(levelNum + 1), {
+  showModal(title, lines.join('\n'), 'Next Level', () => startLevel(levelNum + 1), {
     stars,
     tone: difficulty ? 'danger' : undefined,
     note: notes.length ? notes.join(' · ') : undefined,
-    segs: { before, after, earned },
+    segs: { before, after, earned: banked.earned, full: banked.full },
   });
 }
 
 /** Progress toward the next bonus +Spot: the stars you already had, then this level's
- *  new ones lighting up one by one. Crossing the line fills the bar and announces it. */
-function renderSegs(before: number, after: number, earned: boolean): void {
+ *  new ones lighting up one by one. Crossing the line fills the bar and announces it,
+ *  or says the bank is full. */
+function renderSegs(before: number, after: number, earned: boolean, full: boolean): void {
   const track = el.modalSegs.querySelector('.track')!;
   const label = el.modalSegs.querySelector('.label')!;
+  const crossed = earned || full;
   const had = before % STARS_PER_BONUS;
-  const have = earned ? STARS_PER_BONUS : after % STARS_PER_BONUS;
+  const have = crossed ? STARS_PER_BONUS : after % STARS_PER_BONUS;
   track.replaceChildren(
     ...Array.from({ length: STARS_PER_BONUS }, (_, i) => {
       const seg = document.createElement('span');
@@ -254,8 +299,10 @@ function renderSegs(before: number, after: number, earned: boolean): void {
     }),
   );
   label.textContent = earned
-    ? `🎁 Bonus +Spot earned! ★ ${after}`
-    : `${STARS_PER_BONUS - (after % STARS_PER_BONUS)} more ★ for a bonus +Spot`;
+    ? `🎁 Bonus +Spot earned! ${bank()}/${BANK_CAP} banked`
+    : full
+      ? `Bank full (${BANK_CAP}/${BANK_CAP}): spend a +Spot to earn more`
+      : `${STARS_PER_BONUS - (after % STARS_PER_BONUS)} more ★ for a bonus +Spot`;
   el.modalSegs.classList.toggle('earned', earned);
 }
 
@@ -338,7 +385,7 @@ function showModal(
     /** A plain progress bar (how much of a failed level got done). */
     bar?: { value: number; label: string };
     /** Star progress toward the next bonus +Spot. */
-    segs?: { before: number; after: number; earned: boolean };
+    segs?: { before: number; after: number; earned: boolean; full: boolean };
     /** A secondary, quieter choice under the main button. */
     alt?: { label: string; action: () => void };
   } = {},
@@ -355,7 +402,7 @@ function showModal(
     el.modalBar.querySelector('.label')!.textContent = opts.bar.label;
   }
   el.modalSegs.classList.toggle('hidden', !opts.segs);
-  if (opts.segs) renderSegs(opts.segs.before, opts.segs.after, opts.segs.earned);
+  if (opts.segs) renderSegs(opts.segs.before, opts.segs.after, opts.segs.earned, opts.segs.full);
   el.modalAlt.classList.toggle('hidden', !opts.alt);
   el.modalAlt.textContent = opts.alt?.label ?? '';
   altAction = opts.alt?.action ?? null;
@@ -476,10 +523,10 @@ function frame(now: number): void {
 /** Star total, banked bonus spots, and how far off the next one is. */
 function starSummary(): string {
   const total = totalStars();
-  const banked = bonusSpots(total, bonusSpent());
+  const banked = bank();
   const toNext = STARS_PER_BONUS - (total % STARS_PER_BONUS);
-  const bank = banked > 0 ? ` · ${banked} bonus +Spot${banked > 1 ? 's' : ''} banked` : '';
-  return `★ ${total} stars · ${toNext} more for a bonus +Spot${bank}`;
+  const next = banked >= BANK_CAP ? 'bank full' : `${toNext} more for a bonus +Spot`;
+  return `★ ${total} stars · ${next} · ${banked}/${BANK_CAP} +Spots banked`;
 }
 
 startLevel(levelNum);

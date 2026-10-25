@@ -1,40 +1,53 @@
 import { describe, expect, it } from 'vitest';
 import { generateLevel, levelConfig, START_SLOTS } from '../src/level';
-import { bonusSpots, freeBoosters, STARS_PER_BONUS, starsFor } from '../src/stars';
+import { BANK_CAP, bankAfterWin, freeBoosters, rateLevel, spotGoal, STARS_PER_BONUS } from '../src/stars';
 
-describe('bonus spots', () => {
-  it('banks one per 10 stars, minus the ones spent', () => {
+const clean = { boostersUsed: 0, free: 0, peakSpots: 3, spotGoal: 3 };
+
+describe('bonus bank', () => {
+  it('banks one +Spot per 10 stars crossed, up to the cap', () => {
     expect(STARS_PER_BONUS).toBe(10);
-    expect(bonusSpots(9, 0)).toBe(0);
-    expect(bonusSpots(10, 0)).toBe(1);
-    expect(bonusSpots(29, 0)).toBe(2);
-    expect(bonusSpots(29, 1)).toBe(1);
-    expect(bonusSpots(29, 5)).toBe(0);
+    expect(BANK_CAP).toBe(2);
+    expect(bankAfterWin(0, 8, 9)).toEqual({ bank: 0, earned: false, full: false });
+    expect(bankAfterWin(0, 9, 10)).toEqual({ bank: 1, earned: true, full: false });
+    expect(bankAfterWin(1, 19, 21)).toEqual({ bank: 2, earned: true, full: false });
+  });
+
+  it('does not grow past the cap, so stars can’t stockpile endless spots', () => {
+    expect(bankAfterWin(2, 29, 31)).toEqual({ bank: 2, earned: false, full: true });
+    // A Super Hard win can cross two thresholds at once; still capped.
+    expect(bankAfterWin(1, 18, 27)).toEqual({ bank: 2, earned: true, full: false });
   });
 });
 
 describe('star rating', () => {
-  it('rates by time left', () => {
-    expect(starsFor(50, 100, 0)).toBe(3);
-    expect(starsFor(40, 100, 0)).toBe(3);
-    expect(starsFor(39, 100, 0)).toBe(2);
-    expect(starsFor(20, 100, 0)).toBe(2);
-    expect(starsFor(19, 100, 0)).toBe(1);
-    expect(starsFor(0, 100, 0)).toBe(1);
+  it('gives one star for clearing, one for playing clean, one for efficiency', () => {
+    expect(rateLevel(clean)).toEqual({ stars: 3, clean: true, efficient: true });
+    expect(rateLevel({ ...clean, peakSpots: 4 })).toEqual({ stars: 2, clean: true, efficient: false });
+    expect(rateLevel({ ...clean, boostersUsed: 1 })).toEqual({ stars: 2, clean: false, efficient: true });
+    expect(rateLevel({ ...clean, boostersUsed: 2, peakSpots: 5 }).stars).toBe(1);
   });
 
-  it('gives flagged levels free boosters', () => {
+  it('costs at most one star for boosters, however many were used', () => {
+    expect(rateLevel({ ...clean, boostersUsed: 1 }).stars).toBe(rateLevel({ ...clean, boostersUsed: 3 }).stars);
+  });
+
+  it('lets flagged levels use their free boosters and stay clean', () => {
     expect(freeBoosters(null)).toBe(0);
     expect(freeBoosters('hard')).toBe(1);
     expect(freeBoosters('super')).toBe(2);
-    expect(starsFor(90, 100, 2, freeBoosters('hard'))).toBe(2);
-    expect(starsFor(90, 100, 2, freeBoosters('super'))).toBe(3);
+    expect(rateLevel({ ...clean, boostersUsed: 1, free: freeBoosters('hard') }).clean).toBe(true);
+    expect(rateLevel({ ...clean, boostersUsed: 2, free: freeBoosters('hard') }).clean).toBe(false);
+    expect(rateLevel({ ...clean, boostersUsed: 2, free: freeBoosters('super') }).stars).toBe(3);
   });
 
-  it('costs a star per booster, never below one', () => {
-    expect(starsFor(90, 100, 1)).toBe(2);
-    expect(starsFor(90, 100, 2)).toBe(1);
-    expect(starsFor(10, 100, 2)).toBe(1);
+  it('caps stars on the gentler layout', () => {
+    expect(rateLevel({ ...clean, cap: 2 }).stars).toBe(2);
+  });
+
+  it('sets the spot goal to "keep one of the starting spots free"', () => {
+    expect(spotGoal(5)).toBe(4);
+    expect(spotGoal(4)).toBe(3); // Tight Squeeze
   });
 });
 
