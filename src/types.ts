@@ -29,9 +29,13 @@ export interface BusSpec {
 /** Every 10th level gets one of these twists. */
 export type Twist = 'mystery' | 'rush' | 'tight';
 
+/** Levels the grading bot found hard get flagged so players know what they're in for. */
+export type Difficulty = 'hard' | 'super';
+
 export interface LevelData {
   level: number;
   twist: Twist | null;
+  difficulty: Difficulty | null;
   cols: number;
   rows: number;
   buses: BusSpec[];

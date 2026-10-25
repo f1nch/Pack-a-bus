@@ -1,14 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { generateLevel, LOCK_START, levelConfig, simulate } from '../src/level';
 
-const secPerBus = (n: number) => {
-  const c = levelConfig(n);
-  return (c.time - 30) / c.busCount;
-};
-
 describe('difficulty curve', () => {
   it('keeps getting harder after the early ramp flattens', () => {
-    expect(secPerBus(52)).toBeLessThan(secPerBus(13));
     expect(levelConfig(52).chunkMax).toBeLessThan(levelConfig(13).chunkMax);
     expect(levelConfig(52).mysteryChance).toBeGreaterThan(levelConfig(13).mysteryChance);
   });
@@ -21,7 +15,7 @@ describe('difficulty curve', () => {
 
   it('peaks on the level before each special level', () => {
     expect(levelConfig(29).locks).toBeGreaterThan(levelConfig(28).locks);
-    expect(secPerBus(29)).toBeLessThan(secPerBus(28));
+    expect(levelConfig(29).chunkMax).toBeLessThanOrEqual(levelConfig(28).chunkMax);
   });
 
   it('leaves the first ten levels alone', () => {

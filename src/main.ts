@@ -2,14 +2,17 @@ import './style.css';
 import { Sfx } from './audio';
 import { Game } from './game';
 import { H, W } from './layout';
-import { generateLevel, twistFor } from './level';
+import { buildGradedLevel } from './grade';
+import { twistFor } from './level';
 import { Renderer } from './render';
-import { bonusSpots, STARS_PER_BONUS, starsFor } from './stars';
-import type { LevelData, Twist } from './types';
+import { bonusSpots, freeBoosters, starPoints, STARS_PER_BONUS, starsFor } from './stars';
+import type { Difficulty, LevelData, Twist } from './types';
 
 const LEVEL_KEY = 'pack-a-bus.level';
 const SOUND_KEY = 'pack-a-bus.muted';
 const starsKey = (n: number) => `pack-a-bus.stars.${n}`;
+/** Difficulty flag of a won level, so its stars keep their multiplier in the total. */
+const diffKey = (n: number) => `pack-a-bus.diff.${n}`;
 const SEEN_LOCKS_KEY = 'pack-a-bus.seen.locks';
 const BONUS_SPENT_KEY = 'pack-a-bus.bonus-spent';
 
@@ -20,6 +23,19 @@ const TWIST_INFO: Record<Twist, { title: string; text: string }> = {
   },
   rush: { title: 'Rush Hour', text: 'Less time on the clock. Move fast!' },
   tight: { title: 'Tight Squeeze', text: 'One parking spot is closed. Plan every move.' },
+};
+
+const DIFFICULTY_INFO: Record<Difficulty, { title: string; text: string; win: string }> = {
+  hard: {
+    title: '⚠ Hard Level',
+    text: 'Our test bot needed both boosters to get through this one. Your first booster is free, and stars count ×2.',
+    win: 'Hard Level Beaten!',
+  },
+  super: {
+    title: '☠ Super Hard',
+    text: 'Our test bot couldn’t beat this one, even with both boosters. Boosters are free, and stars count ×3.',
+    win: 'Super Hard Beaten!',
+  },
 };
 
 function load(key: string): string | null {
@@ -78,18 +94,20 @@ let levelNum = clampLevel(parseInt(load(LEVEL_KEY) ?? '1', 10));
 let game: Game;
 let paused = true;
 let modalAction: () => void = () => {};
+/** Level whose intro cards were already shown, so retries skip straight to play. */
+let introShownFor = 0;
 
 // Generate before saving, so a level that fails to build is never persisted and
 // can't brick every reload. On failure, skip ahead a few levels, then fall back to 1.
 function buildLevel(n: number): { n: number; level: LevelData } {
   for (let i = 0; i < 5 && n + i <= MAX_LEVEL; i++) {
     try {
-      return { n: n + i, level: generateLevel(n + i) };
+      return { n: n + i, level: buildGradedLevel(n + i) };
     } catch (err) {
       console.error(err);
     }
   }
-  return { n: 1, level: generateLevel(1) };
+  return { n: 1, level: buildGradedLevel(1) };
 }
 
 function startLevel(requested: number): void {
@@ -111,7 +129,10 @@ function startLevel(requested: number): void {
     bonusSpotUsed: () => save(BONUS_SPENT_KEY, String(bonusSpent() + 1)),
   }, bonusSpots(totalStars(), bonusSpent()));
   el.level.textContent = String(n);
-  el.level.parentElement!.classList.toggle('special', !!level.twist);
+  const pill = el.level.parentElement!;
+  pill.classList.toggle('special', !!level.twist);
+  pill.classList.toggle('hard', level.difficulty === 'hard');
+  pill.classList.toggle('super', level.difficulty === 'super');
   el.vip.classList.remove('pulse');
   el.slot.classList.remove('pulse');
   showTwistOrPlay();
@@ -123,13 +144,18 @@ function bestStars(n: number): number {
   return v >= 1 && v <= 3 ? v : 0;
 }
 
-/** Sum of the best stars on every level won so far. */
+function savedDifficulty(n: number): Difficulty | null {
+  const v = load(diffKey(n));
+  return v === 'hard' || v === 'super' ? v : null;
+}
+
+/** Sum of the best stars on every level won so far, with Hard/Super Hard multipliers. */
 function totalStars(): number {
   let total = 0;
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const m = /^pack-a-bus\.stars\.(\d+)$/.exec(localStorage.key(i) ?? '');
-      if (m) total += bestStars(Number(m[1]));
+      if (m) total += starPoints(bestStars(Number(m[1])), savedDifficulty(Number(m[1])));
     }
   } catch {
     // storage unavailable — no stars banked
@@ -143,10 +169,13 @@ function bonusSpent(): number {
 }
 
 function showWin(reason: string): void {
-  const stars = starsFor(game.time, game.level.time, game.boostersUsed);
+  const difficulty = game.level.difficulty;
+  const free = freeBoosters(difficulty);
+  const stars = starsFor(game.time, game.level.time, game.boostersUsed, free);
   const best = bestStars(levelNum);
   const before = totalStars();
   if (stars > best) save(starsKey(levelNum), String(stars));
+  if (difficulty) save(diffKey(levelNum), difficulty);
   const after = totalStars();
 
   const lines = [reason];
@@ -154,38 +183,69 @@ function showWin(reason: string): void {
   if (stars > best && best > 0) lines.push('New best!');
   else if (best > stars) lines.push(`Your best: ${'★'.repeat(best)}`);
   if (stars < 3) {
-    lines.push(game.boostersUsed > 0 ? 'Skip the boosters for more stars.' : 'Finish faster for more stars.');
+    lines.push(game.boostersUsed > free ? 'Skip the boosters for more stars.' : 'Finish faster for more stars.');
   }
   if (twistFor(levelNum + 1)) lines.push('Next up: a special level!');
-  const title = game.closeCall ? 'Close Call!' : 'Level Complete!';
+
+  const notes: string[] = [];
+  if (difficulty) notes.push(`×${difficulty === 'super' ? 3 : 2} stars: +${starPoints(stars, difficulty)} toward your total`);
+  if (earned) notes.push(`🎁 ${after} stars: bonus +Spot earned!`);
+  const title = difficulty ? DIFFICULTY_INFO[difficulty].win : game.closeCall ? 'Close Call!' : 'Level Complete!';
+  if (difficulty) sfx.play('close');
   showModal(title, lines.join(' '), 'Next Level', () => startLevel(levelNum + 1), {
     stars,
-    note: earned ? `🎁 ${after} stars: bonus +Spot earned!` : undefined,
+    tone: difficulty ? 'danger' : undefined,
+    note: notes.length ? notes.join(' · ') : undefined,
   });
 }
 
-/** Special levels open with a card explaining their twist, and the first level
- *  with locked buses explains those once. */
+interface Card {
+  title: string;
+  text: string;
+  button: string;
+  tone: 'gold' | 'danger';
+  onClose?: () => void;
+}
+
+/** Intro cards for a level, shown one after another before play: the special-level
+ *  twist, the Hard/Super Hard warning, and (once ever) how locked buses work.
+ *  Retrying the same level skips them. */
 function showTwistOrPlay(): void {
-  const twist = game.level.twist;
-  if (twist) {
-    const info = TWIST_INFO[twist];
-    showModal(`★ ${info.title} ★`, `Special level! ${info.text}`, 'Go!', hideModal, { special: true });
-  } else if (game.level.buses.some((b) => b.lock >= 0) && load(SEEN_LOCKS_KEY) !== '1') {
-    showModal(
-      '🔒 Locked Buses',
-      'New! A bus with a padlock can’t leave until the bus with the matching key has left the lot.',
-      'Got it',
-      () => {
-        // Only once it's actually been read (the title card can cover it at boot).
-        save(SEEN_LOCKS_KEY, '1');
-        hideModal();
-      },
-      { special: true },
-    );
-  } else {
-    hideModal();
+  const level = game.level;
+  const cards: Card[] = [];
+  if (introShownFor !== level.level) {
+    if (level.twist) {
+      const info = TWIST_INFO[level.twist];
+      cards.push({ title: `★ ${info.title} ★`, text: `Special level! ${info.text}`, button: 'Go!', tone: 'gold' });
+    }
+    if (level.difficulty) {
+      const info = DIFFICULTY_INFO[level.difficulty];
+      cards.push({ title: info.title, text: info.text, button: 'Bring it on', tone: 'danger' });
+    }
   }
+  if (level.buses.some((b) => b.lock >= 0) && load(SEEN_LOCKS_KEY) !== '1') {
+    cards.push({
+      title: '🔒 Locked Buses',
+      text: 'New! A bus with a padlock can’t leave until the bus with the matching key has left the lot.',
+      button: 'Got it',
+      tone: 'gold',
+      // Only once it's actually been read (the title card can cover it at boot).
+      onClose: () => save(SEEN_LOCKS_KEY, '1'),
+    });
+  }
+  const next = (): void => {
+    const card = cards.shift();
+    if (!card) {
+      introShownFor = level.level;
+      hideModal();
+      return;
+    }
+    showModal(card.title, card.text, card.button, () => {
+      card.onClose?.();
+      next();
+    }, { tone: card.tone });
+  };
+  next();
 }
 
 let bannerTimer = 0;
@@ -211,9 +271,10 @@ function showModal(
   text: string,
   button: string,
   action: () => void,
-  opts: { stars?: number; special?: boolean; note?: string } = {},
+  opts: { stars?: number; tone?: 'gold' | 'danger'; note?: string } = {},
 ): void {
-  el.modalCard.classList.toggle('special', !!opts.special);
+  el.modalCard.classList.toggle('special', opts.tone === 'gold');
+  el.modalCard.classList.toggle('danger', opts.tone === 'danger');
   el.modalNote.textContent = opts.note ?? '';
   el.modalNote.classList.toggle('hidden', !opts.note);
   el.modalStars.classList.toggle('hidden', opts.stars === undefined);

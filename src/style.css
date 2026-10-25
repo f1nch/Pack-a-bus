@@ -293,6 +293,37 @@ button.icon {
   color: var(--accent-ink);
 }
 
+.pill.hard {
+  background: linear-gradient(#ff7a45, #d9471c);
+}
+
+.pill.hard::after {
+  content: ' ⚠';
+}
+
+.pill.super {
+  background: linear-gradient(#7a1fd1, #3d0a6e);
+  box-shadow: 0 0 18px rgba(170, 70, 255, 0.7);
+}
+
+.pill.super::after {
+  content: ' ☠';
+}
+
+.card.danger {
+  background: linear-gradient(#ffe3dc, #fff);
+  border: 6px solid #e0482a;
+}
+
+.card.danger h1 {
+  color: #b5260c;
+}
+
+.card.danger .note {
+  background: #ffe0d6;
+  color: #9a2a10;
+}
+
 .stars {
   display: flex;
   justify-content: center;

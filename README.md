@@ -20,11 +20,12 @@ npm test          # level generator tests (validity + solvability)
 npm run build     # typecheck + production build in dist/
 ```
 
-Levels are generated procedurally from the level number, so they are endless and deterministic. Every level is checked by a simulation to be solvable with fewer parking spots than the player gets. Progress is saved in `localStorage`.
+Levels are generated procedurally from the level number, so they are endless and deterministic. Every level is checked by a simulation to be solvable with fewer parking spots than the player gets. A greedy, human-like bot then plays a few candidate layouts per level and keeps the one closest to a designed difficulty curve; levels it needs both boosters for are flagged **Hard**, and ones it can't beat at all are **Super Hard**. Progress is saved in `localStorage`.
 
 ## Code map
 
 - `src/level.ts`: level generator and solvability simulation
+- `src/grade.ts`: human-like bot that grades levels, the difficulty curve, and Hard/Super Hard flags
 - `src/grid.ts`: lot grid helpers (occupancy, path probing)
 - `src/game.ts`: game state, input, bus movement, boarding, win/lose rules
 - `src/render.ts`: Canvas drawing

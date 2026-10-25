@@ -49,7 +49,7 @@ export function levelConfig(level: number): LevelConfig {
   const twist = twistFor(level);
   const w = wave(level);
   // Bus count and colors max out around level 13, so past level 12 a slow
-  // "pressure" ramp (full by level 52) keeps tightening time, color mixing and mysteries.
+  // "pressure" ramp (full by level 52) keeps tightening color mixing and mysteries.
   const pressure = level > 12 ? clamp((level - 12) / 40 + 0.25 * w, 0, 1) : 0;
   const busCount = Math.min(38, 14 + level * 2) - (w < 0 ? 8 : 0);
   const locks =
@@ -62,7 +62,9 @@ export function levelConfig(level: number): LevelConfig {
     genSlots: level <= 2 ? 4 : level <= 6 ? 3 : 2,
     mysteryChance:
       twist === 'mystery' ? 0.6 : level < 4 ? 0 : Math.min(0.3, 0.06 * (level - 3)) + 0.1 * pressure,
-    time: Math.round((30 + busCount * (4 - 0.75 * pressure)) * (twist === 'rush' ? 0.7 : 1)),
+    // Generous on purpose: the clock is tension, the parking puzzle is what beats you.
+    // Only Rush Hour makes time the real enemy.
+    time: Math.round((30 + busCount * 6) * (twist === 'rush' ? 0.7 : 1)),
     slots: twist === 'tight' ? START_SLOTS - 1 : START_SLOTS,
     twist,
     chunkMin: 4 - Math.round(pressure),
@@ -195,10 +197,12 @@ export function boardTarget<T extends { color: ColorId; left: number }>(
   return best;
 }
 
-export function generateLevel(level: number): LevelData {
+/** `variant` picks a different family of layouts for the same level (0 is the default),
+ *  so the grader can choose between several candidates. */
+export function generateLevel(level: number, variant = 0): LevelData {
   const cfg = levelConfig(level);
   for (let attempt = 0; attempt < 50; attempt++) {
-    const rng = mulberry32(level * 7919 + attempt * 104729 + 17);
+    const rng = mulberry32(level * 7919 + (variant * 50 + attempt) * 104729 + 17);
     const buses = placeBuses(rng, cfg.busCount);
     if (buses.length < Math.ceil(cfg.busCount * 0.85)) continue;
 
@@ -213,6 +217,7 @@ export function generateLevel(level: number): LevelData {
     const data: LevelData = {
       level,
       twist: cfg.twist,
+      difficulty: null,
       cols: COLS,
       rows: ROWS,
       buses,

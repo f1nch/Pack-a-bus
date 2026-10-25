@@ -168,7 +168,7 @@ export class Game {
   status: 'playing' | 'won' | 'lost' = 'playing';
   boosters = { ...START_BOOSTERS };
   vipMode = false;
-  /** Set when the player got out of a jam or cut it fine on time. */
+  /** Set when the player finished with the clock nearly out. */
   closeCall = false;
   private slowMo = 0;
   private boardTimer = 0;
@@ -559,8 +559,8 @@ export class Game {
   }
 
   private onLastBoard(): void {
-    if (this.time <= CLOSE_TIME) this.closeCall = true;
-    if (!this.closeCall) return;
+    if (this.time > CLOSE_TIME) return;
+    this.closeCall = true;
     this.slowMo = SLOW_MO;
     this.events.sound('close');
     this.events.closeCall();
@@ -612,8 +612,6 @@ export class Game {
       this.stuckNotified = false;
       return;
     }
-    // Getting out of a full, stuck lot (with a booster) and still winning is a close call.
-    this.closeCall = true;
     if (this.canUseVip() || this.canUseSlot()) {
       if (!this.stuckNotified) {
         this.stuckNotified = true;

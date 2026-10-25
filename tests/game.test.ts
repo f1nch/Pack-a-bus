@@ -105,6 +105,22 @@ describe('bonus spots', () => {
 });
 
 describe('close call', () => {
+  it('does not fire for a booster rescue with plenty of time left', () => {
+    let closeCalls = 0;
+    const game = new Game(generateLevel(1), { ...quiet, closeCall: () => closeCalls++ });
+    // Fill every open spot with a bus nobody at the front wants, then let the game notice.
+    const front = game.queue[0];
+    for (const slot of game.slots) {
+      if (slot.vip || slot.locked) continue;
+      const bus = game.buses.find((b) => b.state === 'lot' && b.color !== front)!;
+      bus.state = 'docked';
+      slot.bus = bus;
+    }
+    game.update(1 / 60);
+    expect(game.closeCall).toBe(false);
+    expect(closeCalls).toBe(0);
+  });
+
   it('fires once and slows time when a level is won with little time left', () => {
     const { game, result, closeCalls } = playSolution(1, false, (g) => {
       if (g.remaining > 0 && g.remaining < 10) g.time = Math.min(g.time, 8);

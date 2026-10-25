@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { generateLevel, levelConfig, START_SLOTS } from '../src/level';
-import { bonusSpots, STARS_PER_BONUS, starsFor } from '../src/stars';
+import { bonusSpots, freeBoosters, STARS_PER_BONUS, starsFor } from '../src/stars';
 
 describe('bonus spots', () => {
   it('banks one per 10 stars, minus the ones spent', () => {
@@ -21,6 +21,14 @@ describe('star rating', () => {
     expect(starsFor(20, 100, 0)).toBe(2);
     expect(starsFor(19, 100, 0)).toBe(1);
     expect(starsFor(0, 100, 0)).toBe(1);
+  });
+
+  it('gives flagged levels free boosters', () => {
+    expect(freeBoosters(null)).toBe(0);
+    expect(freeBoosters('hard')).toBe(1);
+    expect(freeBoosters('super')).toBe(2);
+    expect(starsFor(90, 100, 2, freeBoosters('hard'))).toBe(2);
+    expect(starsFor(90, 100, 2, freeBoosters('super'))).toBe(3);
   });
 
   it('costs a star per booster, never below one', () => {
