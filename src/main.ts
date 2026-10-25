@@ -60,6 +60,9 @@ const canvas = $<HTMLCanvasElement>('#game');
 const ui = $<HTMLDivElement>('#ui');
 const ctx = canvas.getContext('2d')!;
 const renderer = new Renderer(ctx);
+const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+renderer.reducedMotion = !!reducedMotion?.matches;
+reducedMotion?.addEventListener?.('change', (e) => (renderer.reducedMotion = e.matches));
 const sfx = new Sfx();
 sfx.muted = load(SOUND_KEY) === '1';
 
@@ -115,7 +118,7 @@ function startLevel(requested: number): void {
   levelNum = n;
   save(LEVEL_KEY, String(n));
   game = new Game(level, {
-    sound: (name) => sfx.play(name),
+    sound: (name, detail) => sfx.play(name, detail),
     toast,
     stuck: () => {
       el.vip.classList.toggle('pulse', game.canUseVip());

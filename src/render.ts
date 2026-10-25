@@ -40,6 +40,8 @@ export class Renderer {
   private bg = document.createElement('canvas');
   private scale = 1;
   private clock = 0;
+  /** Honors prefers-reduced-motion: no squash/press scaling and no confetti. */
+  reducedMotion = false;
 
   constructor(private ctx: CanvasRenderingContext2D) {}
 
@@ -69,6 +71,42 @@ export class Renderer {
     this.drawQueue(game);
     for (const bus of game.buses) if (bus.state === 'moving' && bus.lifted) this.drawBus(bus, bus.x, bus.y, bus.angle);
     this.drawFlyers(game);
+    this.drawBursts(game);
+  }
+
+  /** Confetti and a ring when a bus fills up. Reduced motion keeps just a soft ring. */
+  private drawBursts(game: Game): void {
+    const ctx = this.ctx;
+    for (const b of game.bursts) {
+      const t = b.t;
+      const shade = PALETTE[b.color];
+      ctx.save();
+      ctx.globalAlpha = 1 - t;
+      ctx.strokeStyle = shade.light;
+      ctx.lineWidth = 5 * (1 - t) + 1;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 24 + 70 * t, 0, Math.PI * 2);
+      ctx.stroke();
+      if (!this.reducedMotion) {
+        const colors = [shade.fill, shade.light, '#ffffff', '#ffd84a'];
+        for (let i = 0; i < 16; i++) {
+          // Golden-angle spread so the pieces fan out evenly without randomness.
+          const a = i * 2.39996;
+          const speed = 120 + ((i * 37) % 70);
+          const d = speed * t * (1 - 0.35 * t);
+          const x = b.x + Math.cos(a) * d;
+          const y = b.y + Math.sin(a) * d + 160 * t * t;
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.rotate(a + t * 9);
+          ctx.fillStyle = colors[i % colors.length];
+          const sz = 9 * (1 - t * 0.6);
+          ctx.fillRect(-sz / 2, -sz / 4, sz, sz / 2);
+          ctx.restore();
+        }
+      }
+      ctx.restore();
+    }
   }
 
   private drawSlots(game: Game): void {
@@ -184,7 +222,20 @@ export class Renderer {
     const w = BUS_W;
     const shade: Shade = bus.mystery ? MYSTERY : PALETTE[bus.color];
     let s = bus.scale;
-    if (bus.popT >= 0) s *= 1 + 0.25 * Math.sin(bus.popT * Math.PI);
+    // Squash along the bus's length (kx) and bulge across it (ky).
+    let kx = 1;
+    let ky = 1;
+    if (!this.reducedMotion) {
+      if (bus.popT >= 0) s *= 1 + 0.25 * Math.sin(bus.popT * Math.PI);
+      if (bus.pressT >= 0) s *= 1 - 0.08 * Math.sin(bus.pressT * Math.PI);
+      if (bus.parkT >= 0) {
+        // Compress as it brakes, then a small wobble back to rest.
+        const t = bus.parkT;
+        const w = Math.sin(t * Math.PI * 2.5) * (1 - t);
+        kx = 1 - 0.12 * w;
+        ky = 1 + 0.1 * w;
+      }
+    }
 
     ctx.save();
     ctx.translate(x, y);
@@ -199,7 +250,7 @@ export class Renderer {
       ctx.restore();
     }
     ctx.rotate(angle);
-    ctx.scale(s, s);
+    ctx.scale(s * kx, s * ky);
 
     if (!bus.lifted) {
       ctx.fillStyle = 'rgba(0,0,0,0.25)';
@@ -267,15 +318,19 @@ export class Renderer {
 
     if (showCount) {
       const left = bus.capacity - bus.filled;
+      const pop = bus.countPopT >= 0 && !this.reducedMotion ? Math.sin(bus.countPopT * Math.PI) : 0;
       ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(1 + 0.45 * pop, 1 + 0.45 * pop);
       ctx.font = 'bold 20px system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.lineWidth = 4;
       ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-      ctx.strokeText(String(left), x, y);
-      ctx.fillStyle = '#fff';
-      ctx.fillText(String(left), x, y);
+      const label = left === 0 ? '✓' : String(left);
+      ctx.strokeText(label, 0, 0);
+      ctx.fillStyle = pop > 0.3 || left === 0 ? '#fff27a' : '#fff';
+      ctx.fillText(label, 0, 0);
       ctx.restore();
     }
   }

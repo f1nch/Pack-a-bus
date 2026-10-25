@@ -381,6 +381,36 @@ button.icon {
   box-shadow: 0 7px 0 #247a2c;
 }
 
+/* Reduced motion: keep the information, drop the bouncing. */
+@media (prefers-reduced-motion: reduce) {
+  .stars span,
+  .timer.danger,
+  .booster.pulse {
+    animation: none;
+  }
+
+  #banner.show {
+    animation: banner-fade 1.6s ease-out forwards;
+  }
+
+  #toast {
+    transition: opacity 0.2s;
+  }
+}
+
+@keyframes banner-fade {
+  0%,
+  100% {
+    opacity: 0;
+    transform: rotate(-4deg);
+  }
+  15%,
+  75% {
+    opacity: 1;
+    transform: rotate(-4deg);
+  }
+}
+
 @keyframes star-pop {
   from {
     opacity: 0;

@@ -35,7 +35,9 @@ export type SoundName =
   | 'win'
   | 'lose'
   | 'unlock'
-  | 'close';
+  | 'close'
+  | 'tap'
+  | 'depart';
 
 export interface Waypoint {
   x: number;
@@ -64,7 +66,23 @@ export interface Bus extends BusSpec {
   bumpDist: number;
   shakeT: number;
   popT: number;
+  /** Quick press-down when tapped. */
+  pressT: number;
+  /** Squash-and-settle as it pulls into its spot. */
+  parkT: number;
+  /** Seat counter pop when a passenger sits down. */
+  countPopT: number;
+  /** Current driving speed; buses accelerate off the line. */
+  speed: number;
   leaveDelay: number;
+}
+
+/** Confetti puff when a bus fills up (visual only). */
+export interface Burst {
+  x: number;
+  y: number;
+  color: ColorId;
+  t: number;
 }
 
 export interface Flyer {
@@ -82,7 +100,8 @@ export interface Slot {
 }
 
 export interface GameEvents {
-  sound(name: SoundName): void;
+  /** `detail` is the seat number for 'board' (so the pitch can climb as a bus fills). */
+  sound(name: SoundName, detail?: number): void;
   toast(msg: string): void;
   stuck(): void;
   end(won: boolean, reason: string): void;
@@ -93,6 +112,10 @@ export interface GameEvents {
 }
 
 const DRIVE_SPEED = 950;
+/** Buses reach full speed in about 0.15s, and ease into their spot over the last stretch. */
+const DRIVE_ACCEL = 6500;
+const DOCK_EASE_DIST = 110;
+const BURST_TIME = 0.6;
 const LIFT_SPEED = 650;
 const BOARD_INTERVAL = 0.045;
 const FLY_TIME = 0.2;
@@ -164,6 +187,7 @@ export class Game {
   /** Visual lag of the line while it shuffles forward. */
   queueOffset = 0;
   flyers: Flyer[] = [];
+  bursts: Burst[] = [];
   time: number;
   status: 'playing' | 'won' | 'lost' = 'playing';
   boosters = { ...START_BOOSTERS };
@@ -211,6 +235,10 @@ export class Game {
         bumpDist: 0,
         shakeT: -1,
         popT: -1,
+        pressT: -1,
+        parkT: -1,
+        countPopT: -1,
+        speed: 0,
         leaveDelay: 0,
       };
     });
@@ -265,6 +293,8 @@ export class Game {
 
     const bus = this.busAt(x, y);
     if (!bus) return;
+    bus.pressT = 0;
+    this.events.sound('tap');
 
     if (this.vipMode) {
       this.liftToVip(bus);
@@ -430,12 +460,13 @@ export class Game {
   private depart(bus: Bus): void {
     this.slots[bus.slot].bus = null;
     bus.state = 'leaving';
+    bus.speed = 0;
     const sx = slotCenterX(bus.slot);
     this.setPath(bus, [
       { x: sx, y: ROAD_TOP, reverse: true },
       { x: W + 160, y: ROAD_TOP },
     ]);
-    this.events.sound('full');
+    this.events.sound('depart');
   }
 
   /** Mystery buses show their color once nothing blocks their way out. */
@@ -454,7 +485,16 @@ export class Game {
   }
 
   private followPath(bus: Bus, dt: number): void {
-    let dist = (bus.lifted ? LIFT_SPEED : DRIVE_SPEED) * dt;
+    let dist: number;
+    if (bus.lifted) dist = LIFT_SPEED * dt;
+    else {
+      bus.speed = Math.min(DRIVE_SPEED, bus.speed + DRIVE_ACCEL * dt);
+      let speed = bus.speed;
+      // Brake into the parking spot instead of slamming to a stop.
+      const left = bus.pathTotal - bus.pathDone;
+      if (bus.state === 'moving' && left < DOCK_EASE_DIST) speed *= Math.max(0.3, left / DOCK_EASE_DIST);
+      dist = speed * dt;
+    }
     let target = bus.angle;
     while (dist > 0 && bus.path.length) {
       const wp = bus.path[0];
@@ -488,6 +528,7 @@ export class Game {
       bus.angle = -Math.PI / 2;
       bus.scale = 1;
       bus.lifted = false;
+      bus.parkT = 0;
       this.events.sound('park');
     } else if (bus.state === 'leaving') {
       bus.state = 'gone';
@@ -514,6 +555,18 @@ export class Game {
         bus.popT += dt / 0.35;
         if (bus.popT >= 1) bus.popT = -1;
       }
+      if (bus.pressT >= 0) {
+        bus.pressT += dt / 0.18;
+        if (bus.pressT >= 1) bus.pressT = -1;
+      }
+      if (bus.parkT >= 0) {
+        bus.parkT += dt / 0.35;
+        if (bus.parkT >= 1) bus.parkT = -1;
+      }
+      if (bus.countPopT >= 0) {
+        bus.countPopT += dt / 0.2;
+        if (bus.countPopT >= 1) bus.countPopT = -1;
+      }
       if (bus.state === 'moving' || bus.state === 'leaving') this.followPath(bus, dt);
       else if (bus.state === 'docked' && bus.filled === bus.capacity) {
         bus.leaveDelay -= dt;
@@ -526,11 +579,21 @@ export class Game {
     for (const f of this.flyers) {
       f.t += dt / FLY_TIME;
       if (f.t >= 1) {
-        f.bus.filled++;
-        if (f.bus.filled === f.bus.capacity) f.bus.leaveDelay = 0.25;
+        const bus = f.bus;
+        bus.filled++;
+        bus.countPopT = 0;
+        if (bus.filled === bus.capacity) {
+          // Hold a beat so the full moment lands before it drives off.
+          bus.leaveDelay = 0.35;
+          bus.popT = 0;
+          this.bursts.push({ x: bus.x, y: bus.y, color: bus.color, t: 0 });
+          this.events.sound('full');
+        }
       }
     }
     this.flyers = this.flyers.filter((f) => f.t < 1);
+    for (const b of this.bursts) b.t += dt / BURST_TIME;
+    this.bursts = this.bursts.filter((b) => b.t < 1);
 
     this.queueOffset = Math.max(0, this.queueOffset - dt * (6 + this.queueOffset * 9));
 
@@ -553,7 +616,7 @@ export class Game {
       target.reserved++;
       this.flyers.push({ color, x0, y0, bus: target, t: 0 });
       this.boardTimer += BOARD_INTERVAL;
-      this.events.sound('board');
+      this.events.sound('board', target.reserved);
       if (this.qHead === this.queue.length) this.onLastBoard();
     }
   }
