@@ -505,6 +505,27 @@ button.icon {
   width: 640px;
 }
 
+.garage-card .tabs {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin: -4px 0 14px;
+}
+
+#ui .garage-card .tab {
+  padding: 10px 24px;
+  border-radius: 999px;
+  background: #eef1f7;
+  color: #4a5270;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+#ui .garage-card .tab.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
 .garage-card .sub {
   margin: -6px 0 20px;
   font-size: 22px;

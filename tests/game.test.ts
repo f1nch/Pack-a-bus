@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Game } from '../src/game';
 import { CELL, LOT_X, LOT_Y } from '../src/layout';
 import { generateLevel, levelConfig } from '../src/level';
-import { rateLevel, spotGoal } from '../src/stars';
+import { parTime, rateLevel } from '../src/stars';
 
 const quiet = {
   sound: () => {},
@@ -49,25 +49,27 @@ const rate = (game: Game) =>
   rateLevel({
     boostersUsed: game.boostersUsed,
     free: 0,
-    peakSpots: game.peakSpots,
-    spotGoal: spotGoal(game.level.slots),
+    elapsed: game.elapsed,
+    par: parTime(game.buses.length),
   });
 
 describe('game flow', () => {
-  it('playing the solution patiently wins with 3 stars and no boosters', () => {
+  it('playing the solution briskly with packed spots wins 3 stars, no boosters, under par', () => {
     for (const n of [1, 7, 15]) {
-      const { game, result } = playSolution(n, false, undefined, true);
+      const { game, result } = playSolution(n);
       expect(result?.won).toBe(true);
       expect(game.boostersUsed).toBe(0);
-      expect(game.peakSpots).toBeLessThanOrEqual(levelConfig(n).genSlots);
+      expect(game.elapsed).toBeLessThan(parTime(game.buses.length));
       expect(rate(game).stars).toBe(3);
     }
   });
 
-  it('tracks the most regular spots full at once', () => {
-    const { game } = playSolution(15);
-    expect(game.peakSpots).toBeGreaterThan(levelConfig(15).genSlots);
-    expect(rate(game).efficient).toBe(false);
+  it('packing spots is faster than parking one bus at a time', () => {
+    const packed = playSolution(15).game;
+    const sparse = playSolution(15, false, undefined, true).game;
+    expect(packed.peakSpots).toBeGreaterThan(sparse.peakSpots);
+    expect(packed.elapsed).toBeLessThan(sparse.elapsed);
+    expect(sparse.peakSpots).toBeLessThanOrEqual(levelConfig(15).genSlots);
   });
 
   it('counts boosters used', () => {

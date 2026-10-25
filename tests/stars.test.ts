@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { generateLevel, levelConfig, START_SLOTS } from '../src/level';
-import { BANK_CAP, bankAfterWin, freeBoosters, rateLevel, spotGoal, STARS_PER_BONUS } from '../src/stars';
+import { BANK_CAP, bankAfterWin, freeBoosters, parTime, rateLevel, STARS_PER_BONUS } from '../src/stars';
 
-const clean = { boostersUsed: 0, free: 0, peakSpots: 3, spotGoal: 3 };
+const clean = { boostersUsed: 0, free: 0, elapsed: 60, par: 70 };
 
 describe('bonus bank', () => {
   it('banks one +Spot per 10 stars crossed, up to the cap', () => {
@@ -21,11 +21,16 @@ describe('bonus bank', () => {
 });
 
 describe('star rating', () => {
-  it('gives one star for clearing, one for playing clean, one for efficiency', () => {
-    expect(rateLevel(clean)).toEqual({ stars: 3, clean: true, efficient: true });
-    expect(rateLevel({ ...clean, peakSpots: 4 })).toEqual({ stars: 2, clean: true, efficient: false });
-    expect(rateLevel({ ...clean, boostersUsed: 1 })).toEqual({ stars: 2, clean: false, efficient: true });
-    expect(rateLevel({ ...clean, boostersUsed: 2, peakSpots: 5 }).stars).toBe(1);
+  it('gives one star for clearing, one for playing clean, one for beating par', () => {
+    expect(rateLevel(clean)).toEqual({ stars: 3, clean: true, fast: true });
+    expect(rateLevel({ ...clean, elapsed: 71 })).toEqual({ stars: 2, clean: true, fast: false });
+    expect(rateLevel({ ...clean, boostersUsed: 1 })).toEqual({ stars: 2, clean: false, fast: true });
+    expect(rateLevel({ ...clean, boostersUsed: 2, elapsed: 200 }).stars).toBe(1);
+  });
+
+  it('sets par at 10 seconds plus 2 per bus', () => {
+    expect(parTime(38)).toBe(86);
+    expect(parTime(14)).toBe(38);
   });
 
   it('costs at most one star for boosters, however many were used', () => {
@@ -45,10 +50,6 @@ describe('star rating', () => {
     expect(rateLevel({ ...clean, cap: 2 }).stars).toBe(2);
   });
 
-  it('sets the spot goal to "keep one of the starting spots free"', () => {
-    expect(spotGoal(5)).toBe(4);
-    expect(spotGoal(4)).toBe(3); // Tight Squeeze
-  });
 });
 
 describe('special levels', () => {

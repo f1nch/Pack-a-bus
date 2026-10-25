@@ -26,34 +26,28 @@ export function bankAfterWin(bank: number, before: number, after: number): { ban
   return { bank: next, earned: next > bank, full: crossed > 0 && next === bank };
 }
 
-/** The efficiency star's rule is "never fill every spot": keep at least one of the level's
- *  starting spots free. Spots unlocked with boosters don't raise the goal. (A tighter goal
- *  based on the solution's spot count was tried; the human-like bot almost never met it.) */
-export function spotGoal(slots: number): number {
-  return slots - 1;
+/** Par time in seconds: a moment to read the lot, then 2 seconds per bus. Players who keep
+ *  the spots packed so the line never stops beat it; one-bus-at-a-time play doesn't.
+ *  (Tuned with the human-like bot: ~1.5s per decision beats par, 2s+ mostly misses.) */
+export function parTime(busCount: number): number {
+  return 10 + 2 * busCount;
 }
 
 export interface Rating {
   stars: Stars;
   /** No boosters beyond the level's free allowance. */
   clean: boolean;
-  /** Never needed more than the spot goal at once. */
-  efficient: boolean;
+  /** Finished within par. */
+  fast: boolean;
 }
 
-/** One star for clearing the level, one for playing clean, one for playing efficiently.
+/** One star for clearing the level, one for playing clean, one for beating par.
  *  `cap` limits the result (the opt-in gentler layout tops out at 2). */
-export function rateLevel(o: {
-  boostersUsed: number;
-  free: number;
-  peakSpots: number;
-  spotGoal: number;
-  cap?: number;
-}): Rating {
+export function rateLevel(o: { boostersUsed: number; free: number; elapsed: number; par: number; cap?: number }): Rating {
   const clean = o.boostersUsed <= o.free;
-  const efficient = o.peakSpots <= o.spotGoal;
-  const stars = Math.min(o.cap ?? 3, 1 + Number(clean) + Number(efficient)) as Stars;
-  return { stars, clean, efficient };
+  const fast = o.elapsed <= o.par;
+  const stars = Math.min(o.cap ?? 3, 1 + Number(clean) + Number(fast)) as Stars;
+  return { stars, clean, fast };
 }
 
 /** Flagged levels are graded as needing boosters, so using them there doesn't cost stars. */

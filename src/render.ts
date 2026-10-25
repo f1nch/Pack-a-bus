@@ -22,6 +22,7 @@ import {
 import { MYSTERY, PALETTE, SYMBOLS, type Shade, type ShapeId } from './palette';
 import { personPos, QUEUE_VISIBLE } from './queuePath';
 import type { LiveryId } from './liveries';
+import { type World, WORLDS } from './worlds';
 import type { ColorId } from './types';
 
 const LOCK_TINTS = ['#ffd84a', '#7ff0ff', '#ff8fd0'];
@@ -190,6 +191,8 @@ export class Renderer {
   /** Paint job drawn on every bus (cosmetic only). */
   livery: LiveryId = 'classic';
 
+  private world: World = WORLDS[0];
+
   constructor(private ctx: CanvasRenderingContext2D) {}
 
   resize(pixelScale: number): void {
@@ -198,7 +201,22 @@ export class Renderer {
     this.bg.height = Math.round(H * pixelScale);
     const b = this.bg.getContext('2d')!;
     b.setTransform(pixelScale, 0, 0, pixelScale, 0, 0);
-    drawBackground(b);
+    drawBackground(b, this.world);
+  }
+
+  /** Switches the scenery; the background is cached, so it's redrawn once here. */
+  setWorld(world: World): void {
+    this.world = world;
+    this.resize(this.scale);
+  }
+
+  /** A world's scenery for a garage tile: the parking pad, road and top of the lot. */
+  drawWorldPreview(world: World, width: number, height: number, pixelScale: number): void {
+    const ctx = this.ctx;
+    const s = width / W;
+    ctx.setTransform(pixelScale * s, 0, 0, pixelScale * s, 0, 0);
+    ctx.translate(0, -(H - height / s));
+    drawBackground(ctx, world);
   }
 
   draw(game: Game, dt: number): void {
@@ -613,24 +631,167 @@ function drawPerson(
   }
 }
 
-function drawBackground(ctx: CanvasRenderingContext2D): void {
-  // Grass
-  ctx.fillStyle = '#79c55a';
-  ctx.fillRect(0, 0, W, H);
+/** Spots along the bottom and sides where a world's decorations stand. */
+const DECOR_SPOTS: [number, number, number][] = [
+  [14, 1238, 1],
+  [66, 1272, 0.8],
+  [128, 1250, 0.7],
+  [250, 1282, 0.75],
+  [360, 1262, 0.9],
+  [470, 1284, 0.75],
+  [596, 1250, 0.7],
+  [656, 1274, 0.8],
+  [708, 1240, 1],
+];
 
-  // Water around the crowd's island
-  ctx.fillStyle = '#5bc4f0';
-  roundRect(ctx, -20, -20, W + 40, 465, 40);
-  ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+function drawDecor(ctx: CanvasRenderingContext2D, world: World, x: number, y: number, s: number): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(s, s);
+  const c = world.decorColor;
+  switch (world.decor) {
+    case 'bush':
+      ctx.fillStyle = c;
+      circle(ctx, 0, 0, 30);
+      break;
+    case 'palm':
+      ctx.strokeStyle = '#a0703c';
+      ctx.lineWidth = 7;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-4, 28);
+      ctx.quadraticCurveTo(-8, 0, 4, -26);
+      ctx.stroke();
+      ctx.fillStyle = c;
+      for (const a of [-2.6, -1.9, -1.2, -0.5, 0.2]) {
+        ctx.save();
+        ctx.translate(4, -26);
+        ctx.rotate(a);
+        ctx.beginPath();
+        ctx.ellipse(16, 0, 18, 6, 0.25, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      break;
+    case 'pine':
+      ctx.fillStyle = '#6b4a2b';
+      ctx.fillRect(-4, 14, 8, 14);
+      for (const [w, top] of [
+        [30, -6],
+        [24, -22],
+        [17, -36],
+      ]) {
+        ctx.fillStyle = c;
+        ctx.beginPath();
+        ctx.moveTo(0, top - 16);
+        ctx.lineTo(w, top + 20);
+        ctx.lineTo(-w, top + 20);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.beginPath();
+        ctx.moveTo(0, top - 16);
+        ctx.lineTo(w * 0.35, top - 4);
+        ctx.lineTo(-w * 0.35, top - 4);
+        ctx.fill();
+      }
+      break;
+    case 'cactus':
+      ctx.fillStyle = c;
+      roundRect(ctx, -8, -30, 16, 58, 8);
+      ctx.fill();
+      roundRect(ctx, -24, -14, 10, 26, 5);
+      ctx.fill();
+      ctx.fillRect(-18, 4, 12, 7);
+      roundRect(ctx, 14, -22, 10, 22, 5);
+      ctx.fill();
+      ctx.fillRect(6, -6, 12, 7);
+      break;
+    case 'lamp': {
+      const glow = ctx.createRadialGradient(0, -30, 2, 0, -30, 34);
+      glow.addColorStop(0, 'rgba(255,226,122,0.55)');
+      glow.addColorStop(1, 'rgba(255,226,122,0)');
+      ctx.fillStyle = glow;
+      circle(ctx, 0, -30, 34);
+      ctx.fillStyle = '#4a4f66';
+      ctx.fillRect(-3, -28, 6, 56);
+      ctx.fillStyle = c;
+      circle(ctx, 0, -32, 7);
+      break;
+    }
+    case 'crater':
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.ellipse(0, 6, 30, 16, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.beginPath();
+      ctx.ellipse(0, 9, 22, 10, 0, 0, Math.PI);
+      ctx.fill();
+      break;
+  }
+  ctx.restore();
+}
+
+/** What floats on the water (or sky) at the top of the screen. */
+function drawMarks(ctx: CanvasRenderingContext2D, world: World): void {
   for (let i = 0; i < 26; i++) {
     const x = (i * 137) % W;
     const y = 100 + ((i * 89) % 320);
-    roundRect(ctx, x, y, 22, 4, 2);
-    ctx.fill();
+    switch (world.marks) {
+      case 'waves':
+        ctx.fillStyle = 'rgba(255,255,255,0.18)';
+        roundRect(ctx, x, y, 22, 4, 2);
+        ctx.fill();
+        break;
+      case 'ice':
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        roundRect(ctx, x, y, 26 + (i % 3) * 8, 10 + (i % 2) * 6, 6);
+        ctx.fill();
+        break;
+      case 'dunes':
+        // Wind ripples on the sand.
+        ctx.strokeStyle = 'rgba(160,92,40,0.28)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(x - 20, y);
+        ctx.quadraticCurveTo(x + 5, y - 9, x + 30, y);
+        ctx.stroke();
+        break;
+      case 'lights':
+        // Reflections of city lights on dark water.
+        ctx.fillStyle = i % 3 === 0 ? 'rgba(255,79,216,0.35)' : 'rgba(255,226,122,0.35)';
+        ctx.fillRect(x, y, 3, 14 + (i % 4) * 4);
+        break;
+      case 'stars':
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        circle(ctx, x, y - 60 + ((i * 53) % 60), i % 5 === 0 ? 2.4 : 1.3);
+        break;
+    }
   }
+  if (world.marks === 'stars') {
+    // A small ringed planet low on the horizon, clear of the top bar.
+    ctx.fillStyle = '#e8b06a';
+    circle(ctx, 655, 400, 18);
+    ctx.strokeStyle = 'rgba(255,220,170,0.8)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.ellipse(655, 400, 30, 8, -0.3, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
 
-  // Crowd track
+function drawBackground(ctx: CanvasRenderingContext2D, world: World): void {
+  // Ground
+  ctx.fillStyle = world.ground;
+  ctx.fillRect(0, 0, W, H);
+
+  // Water (or sky) around the crowd's island
+  ctx.fillStyle = world.water;
+  roundRect(ctx, -20, -20, W + 40, 465, 40);
+  ctx.fill();
+  drawMarks(ctx, world);
+
+  // Crowd track (its dark surface stays the same everywhere so passengers read clearly)
   const trace = () => {
     ctx.beginPath();
     QUEUE_PATH.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
@@ -638,7 +799,7 @@ function drawBackground(ctx: CanvasRenderingContext2D): void {
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
   trace();
-  ctx.strokeStyle = '#e8eef6';
+  ctx.strokeStyle = world.trackRim;
   ctx.lineWidth = 62;
   ctx.stroke();
   trace();
@@ -650,20 +811,10 @@ function drawBackground(ctx: CanvasRenderingContext2D): void {
   ctx.fillStyle = '#9097a6';
   ctx.fillRect(0, 440, W, ROAD_TOP - 440);
 
-  // Bushes
-  ctx.fillStyle = '#4fa83c';
-  for (const [x, y] of [
-    [10, 1250],
-    [60, 1270],
-    [690, 1255],
-    [650, 1280],
-    [360, 1290],
-  ]) {
-    circle(ctx, x, y, 30);
-  }
+  for (const [x, y, s] of DECOR_SPOTS) drawDecor(ctx, world, x, y, s);
 
   // Road loop
-  ctx.strokeStyle = '#5f6474';
+  ctx.strokeStyle = world.road;
   ctx.lineWidth = ROAD_W;
   ctx.lineJoin = 'round';
   ctx.beginPath();
@@ -671,7 +822,7 @@ function drawBackground(ctx: CanvasRenderingContext2D): void {
   ctx.moveTo(ROAD_RIGHT, ROAD_TOP);
   ctx.lineTo(W + 30, ROAD_TOP);
   ctx.stroke();
-  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+  ctx.strokeStyle = world.roadLine;
   ctx.lineWidth = 3;
   ctx.setLineDash([16, 14]);
   ctx.beginPath();
@@ -679,10 +830,10 @@ function drawBackground(ctx: CanvasRenderingContext2D): void {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Lot
+  // Lot (same surface in every world; only the rim changes)
   ctx.fillStyle = '#8b91a0';
   ctx.fillRect(LOT_X - 4, LOT_Y - 4, LOT_W + 8, LOT_H + 8);
-  ctx.strokeStyle = '#f2c230';
+  ctx.strokeStyle = world.lotRim;
   ctx.lineWidth = 4;
   ctx.strokeRect(LOT_X - 2, LOT_Y - 2, LOT_W + 4, LOT_H + 4);
   ctx.fillStyle = 'rgba(255,255,255,0.06)';

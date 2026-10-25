@@ -24,8 +24,8 @@ export interface ChallengeStats {
 
 /** Seconds within which three buses must fill for a Hat Trick. */
 export const STREAK_WINDOW = 8;
-/** Seconds per bus allowed on a Speed Run. */
-const SPEED_PER_BUS = 3;
+/** Seconds per bus allowed on a Speed Run: well under par (2s per bus plus 10s). */
+const SPEED_PER_BUS = 1.5;
 
 const KINDS: ChallengeKind[] = ['spare2', 'noVip', 'streak3', 'noBoosters', 'speed'];
 /** Position of the challenge slots inside each block of ten levels. */

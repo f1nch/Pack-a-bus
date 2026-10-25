@@ -3,6 +3,7 @@ import { Sfx } from './audio';
 import { type Challenge, challengeFor, challengeResult } from './challenges';
 import { Game } from './game';
 import { giftFor, type Gift, LIVERIES, type LiveryId } from './liveries';
+import { unlockedWorlds, type World, worldById, WORLDS } from './worlds';
 import { H, W } from './layout';
 import { buildGentlerLevel, buildGradedLevel } from './grade';
 import { twistFor } from './level';
@@ -12,8 +13,8 @@ import {
   bankAfterWin,
   bonusSpots,
   freeBoosters,
+  parTime,
   rateLevel,
-  spotGoal,
   starPoints,
   STARS_PER_BONUS,
 } from './stars';
@@ -34,6 +35,11 @@ const LIVERIES_KEY = 'pack-a-bus.liveries';
 const LIVERY_KEY = 'pack-a-bus.livery';
 /** Stars from gift boxes opened after every livery is collected. */
 const GIFT_STARS_KEY = 'pack-a-bus.gift-stars';
+/** Highest level reached (worlds unlock by it), the chosen world, and how many worlds
+ *  have had their unlock celebrated. */
+const BEST_LEVEL_KEY = 'pack-a-bus.best-level';
+const WORLD_KEY = 'pack-a-bus.world';
+const WORLDS_SEEN_KEY = 'pack-a-bus.worlds-seen';
 
 const TWIST_INFO: Record<Twist, { title: string; text: string }> = {
   mystery: {
@@ -115,6 +121,8 @@ const el = {
   garage: $('#garage'),
   garageGrid: $('#garage .grid'),
   garageClose: $<HTMLButtonElement>('#garage-close'),
+  garageSub: $('#garage .sub'),
+  garageTabs: document.querySelectorAll<HTMLButtonElement>('#garage .tab'),
 };
 
 /** Saved non-negative integer, or `fallback` if missing or junk; never above `max`. */
@@ -137,6 +145,20 @@ function equipLivery(id: LiveryId): void {
   renderer.livery = id;
 }
 renderer.livery = equippedLivery();
+
+const bestLevel = () => Math.max(loadInt(BEST_LEVEL_KEY, 100_000), loadInt(LEVEL_KEY, 100_000, 1));
+
+/** The chosen world if it's unlocked, otherwise the original park. */
+function currentWorld(): World {
+  const w = worldById(load(WORLD_KEY));
+  return w && w.unlockLevel <= bestLevel() ? w : WORLDS[0];
+}
+
+function equipWorld(world: World): void {
+  save(WORLD_KEY, world.id);
+  renderer.setWorld(world);
+}
+renderer.setWorld(currentWorld());
 
 // Saved progress is untrusted (other pages on this origin can write it), so clamp it.
 const MAX_LEVEL = 100_000;
@@ -179,6 +201,7 @@ function startLevel(requested: number, easier = false): void {
   gentle = easier && n === requested;
   levelNum = n;
   save(LEVEL_KEY, String(n));
+  if (n > loadInt(BEST_LEVEL_KEY, 100_000)) save(BEST_LEVEL_KEY, String(n));
   game = new Game(level, {
     sound: (name, detail) => sfx.play(name, detail),
     toast,
@@ -276,12 +299,12 @@ function setBank(n: number): void {
 function showWin(reason: string): void {
   const difficulty = game.level.difficulty;
   const free = freeBoosters(difficulty);
-  const goal = spotGoal(game.level.slots);
+  const par = parTime(game.buses.length);
   const rating = rateLevel({
     boostersUsed: game.boostersUsed,
     free,
-    peakSpots: game.peakSpots,
-    spotGoal: goal,
+    elapsed: game.elapsed,
+    par,
     cap: gentle ? GENTLE_STAR_CAP : 3,
   });
   const stars = rating.stars;
@@ -304,9 +327,9 @@ function showWin(reason: string): void {
     rating.clean
       ? `✓ Clean: no extra boosters`
       : `✗ Clean: used ${game.boostersUsed} booster${game.boostersUsed > 1 ? 's' : ''} (${allowed})`,
-    rating.efficient
-      ? `✓ Efficient: kept a spot free (at most ${game.peakSpots} of ${game.level.slots} full)`
-      : `✗ Efficient: keep one spot free (you filled ${game.peakSpots} of ${game.level.slots})`,
+    rating.fast
+      ? `✓ Speedy: ${fmtTime(game.elapsed)} (par ${fmtTime(par)})`
+      : `✗ Speedy: ${fmtTime(game.elapsed)}, par is ${fmtTime(par)}. Keep the spots packed!`,
   ];
   if (challenge) lines.push(`${challengeMet ? '🎯' : '✗'} Bonus challenge: ${challenge.title}`);
   const extras: string[] = [];
@@ -403,12 +426,26 @@ interface Card {
   onClose?: () => void;
 }
 
-/** Intro cards for a level, shown one after another before play: the special-level
- *  twist, the Hard/Super Hard warning, and (once ever) how locked buses work.
- *  Retrying the same level skips them. */
+/** Intro cards for a level, shown one after another before play: a newly unlocked world,
+ *  the special-level twist, the Hard/Super Hard warning, the bonus challenge, and (once
+ *  ever) how locked buses work. Retrying the same level skips the per-level ones. */
 function showTwistOrPlay(): void {
   const level = game.level;
   const cards: Card[] = [];
+  const reached = unlockedWorlds(bestLevel());
+  // Saves from before worlds existed have seen only the park.
+  if (reached.length > loadInt(WORLDS_SEEN_KEY, WORLDS.length, 1)) {
+    const world = reached[reached.length - 1];
+    // Switch now, so the card already sits in front of the new scenery.
+    equipWorld(world);
+    cards.push({
+      title: '🌍 New World Unlocked!',
+      text: `Welcome to ${world.name}! Your buses drive through new scenery from here on.\nSwitch worlds any time in the 🎨 Garage.`,
+      button: 'Let’s roll',
+      tone: 'gold',
+      onClose: () => save(WORLDS_SEEN_KEY, String(reached.length)),
+    });
+  }
   if (introShownFor !== level.level) {
     if (level.twist) {
       const info = TWIST_INFO[level.twist];
@@ -619,9 +656,11 @@ function syncHud(): void {
   }
 }
 
-/** Garage: preview every paint job; unlocked ones can be equipped, locked ones show which
- *  gift unlocks them, so the next reward is always in sight. */
+/** Garage: paint jobs (earned from challenge gifts) and worlds (earned by reaching levels).
+ *  Unlocked ones can be picked; locked ones show what unlocks them, with the next one
+ *  highlighted so the next reward is always in sight. */
 let pausedBeforeGarage = false;
+let garageTab: 'paint' | 'worlds' = 'paint';
 function openGarage(): void {
   pausedBeforeGarage = paused;
   paused = true;
@@ -629,35 +668,84 @@ function openGarage(): void {
   el.garage.classList.remove('hidden');
 }
 
-function renderGarage(): void {
-  const unlocked = unlockedLiveries();
-  const current = equippedLivery();
-  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
-  const sample = ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink', 'cyan', 'white'] as const;
-  el.garageGrid.replaceChildren(
-    ...LIVERIES.map((livery, i) => {
-      const tile = document.createElement('button');
-      const locked = i > unlocked;
-      const isNext = i === unlocked + 1;
-      tile.className = `tile${locked ? ' locked' : ''}${isNext ? ' next' : ''}${livery.id === current ? ' selected' : ''}`;
-      const c = document.createElement('canvas');
-      c.width = 170 * dpr;
-      c.height = 64 * dpr;
-      new Renderer(c.getContext('2d')!).drawPreview(sample[i % sample.length], livery.id, 170, 64, dpr);
-      const name = document.createElement('span');
-      name.textContent = locked ? (i === unlocked + 1 ? `🔒 Next gift: ${livery.name}` : `🔒 ${livery.name}`) : livery.name;
-      tile.append(c, name);
-      tile.setAttribute('aria-label', locked ? `${livery.name}, locked` : `Equip ${livery.name}`);
-      tile.disabled = locked;
-      tile.addEventListener('click', () => {
-        sfx.play('tap');
-        equipLivery(livery.id);
-        renderGarage();
-      });
-      return tile;
-    }),
-  );
+interface TileSpec {
+  name: string;
+  locked: boolean;
+  next: boolean;
+  selected: boolean;
+  lockedText: string;
+  draw: (r: Renderer, dpr: number) => void;
+  pick: () => void;
 }
+
+function tileFor(spec: TileSpec, dpr: number): HTMLButtonElement {
+  const tile = document.createElement('button');
+  tile.className = `tile${spec.locked ? ' locked' : ''}${spec.next ? ' next' : ''}${spec.selected ? ' selected' : ''}`;
+  const c = document.createElement('canvas');
+  c.width = 170 * dpr;
+  c.height = 64 * dpr;
+  spec.draw(new Renderer(c.getContext('2d')!), dpr);
+  const name = document.createElement('span');
+  name.textContent = spec.locked ? spec.lockedText : spec.name;
+  tile.append(c, name);
+  tile.setAttribute('aria-label', spec.locked ? `${spec.name}, locked` : `Use ${spec.name}`);
+  tile.setAttribute('aria-pressed', String(spec.selected));
+  tile.disabled = spec.locked;
+  tile.addEventListener('click', () => {
+    sfx.play('tap');
+    spec.pick();
+    renderGarage();
+  });
+  return tile;
+}
+
+function renderGarage(): void {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  el.garageTabs.forEach((t) => {
+    const on = t.dataset.tab === garageTab;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-selected', String(on));
+  });
+  let specs: TileSpec[];
+  if (garageTab === 'paint') {
+    el.garageSub.textContent = 'Win bonus challenges to open gifts and unlock paint jobs.';
+    const unlocked = unlockedLiveries();
+    const current = equippedLivery();
+    const sample = ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink', 'cyan', 'white'] as const;
+    specs = LIVERIES.map((livery, i) => ({
+      name: livery.name,
+      locked: i > unlocked,
+      next: i === unlocked + 1,
+      selected: livery.id === current,
+      lockedText: i === unlocked + 1 ? `🔒 Next gift: ${livery.name}` : `🔒 ${livery.name}`,
+      draw: (r, d) => r.drawPreview(sample[i % sample.length], livery.id, 170, 64, d),
+      pick: () => equipLivery(livery.id),
+    }));
+  } else {
+    el.garageSub.textContent = 'A new world opens every 20 levels.';
+    const best = bestLevel();
+    const current = currentWorld();
+    const nextWorld = WORLDS.find((w) => w.unlockLevel > best);
+    specs = WORLDS.map((world) => ({
+      name: world.name,
+      locked: world.unlockLevel > best,
+      next: world === nextWorld,
+      selected: world.id === current.id,
+      lockedText: `🔒 Level ${world.unlockLevel}: ${world.name}`,
+      draw: (r, d) => r.drawWorldPreview(world, 170, 64, d),
+      pick: () => equipWorld(world),
+    }));
+  }
+  el.garageGrid.replaceChildren(...specs.map((s) => tileFor(s, dpr)));
+}
+
+el.garageTabs.forEach((t) =>
+  t.addEventListener('click', () => {
+    sfx.play('tap');
+    garageTab = t.dataset.tab === 'worlds' ? 'worlds' : 'paint';
+    renderGarage();
+  }),
+);
 
 el.garageBtn.addEventListener('click', () => {
   sfx.unlock();
