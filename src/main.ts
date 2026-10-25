@@ -10,6 +10,7 @@ import type { LevelData, Twist } from './types';
 const LEVEL_KEY = 'pack-a-bus.level';
 const SOUND_KEY = 'pack-a-bus.muted';
 const starsKey = (n: number) => `pack-a-bus.stars.${n}`;
+const SEEN_LOCKS_KEY = 'pack-a-bus.seen.locks';
 
 const TWIST_INFO: Record<Twist, { title: string; text: string }> = {
   mystery: {
@@ -57,6 +58,7 @@ const el = {
   sound: $<HTMLButtonElement>('#btn-sound'),
   restart: $<HTMLButtonElement>('#btn-restart'),
   toast: $('#toast'),
+  banner: $('#banner'),
   modal: $('#modal'),
   modalCard: $('#modal .card'),
   modalTitle: $('#modal-title'),
@@ -103,6 +105,7 @@ function startLevel(requested: number): void {
       if (won) showWin(reason);
       else showModal('Level Failed', reason, 'Try Again', () => startLevel(levelNum));
     },
+    closeCall: () => showBanner('CLOSE CALL!'),
   });
   el.level.textContent = String(n);
   el.level.parentElement!.classList.toggle('special', !!level.twist);
@@ -129,18 +132,42 @@ function showWin(reason: string): void {
     lines.push(game.boostersUsed > 0 ? 'Skip the boosters for more stars.' : 'Finish faster for more stars.');
   }
   if (twistFor(levelNum + 1)) lines.push('Next up: a special level!');
-  showModal('Level Complete!', lines.join(' '), 'Next Level', () => startLevel(levelNum + 1), { stars });
+  const title = game.closeCall ? 'Close Call!' : 'Level Complete!';
+  showModal(title, lines.join(' '), 'Next Level', () => startLevel(levelNum + 1), { stars });
 }
 
-/** Special levels open with a card explaining their twist. */
+/** Special levels open with a card explaining their twist, and the first level
+ *  with locked buses explains those once. */
 function showTwistOrPlay(): void {
   const twist = game.level.twist;
-  if (!twist) {
+  if (twist) {
+    const info = TWIST_INFO[twist];
+    showModal(`★ ${info.title} ★`, `Special level! ${info.text}`, 'Go!', hideModal, { special: true });
+  } else if (game.level.buses.some((b) => b.lock >= 0) && load(SEEN_LOCKS_KEY) !== '1') {
+    showModal(
+      '🔒 Locked Buses',
+      'New! A bus with a padlock can’t leave until the bus with the matching key has left the lot.',
+      'Got it',
+      () => {
+        // Only once it's actually been read (the title card can cover it at boot).
+        save(SEEN_LOCKS_KEY, '1');
+        hideModal();
+      },
+      { special: true },
+    );
+  } else {
     hideModal();
-    return;
   }
-  const info = TWIST_INFO[twist];
-  showModal(`★ ${info.title} ★`, `Special level! ${info.text}`, 'Go!', hideModal, { special: true });
+}
+
+let bannerTimer = 0;
+function showBanner(text: string): void {
+  el.banner.textContent = text;
+  el.banner.classList.remove('show');
+  void el.banner.offsetWidth; // restart the animation
+  el.banner.classList.add('show');
+  clearTimeout(bannerTimer);
+  bannerTimer = window.setTimeout(() => el.banner.classList.remove('show'), 1700);
 }
 
 let toastTimer = 0;

@@ -201,6 +201,48 @@ button.icon {
   transform: translate(-50%, 0);
 }
 
+#banner {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 470px;
+  text-align: center;
+  font-size: 88px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 2px;
+  color: #ffe066;
+  -webkit-text-stroke: 4px #8a3a00;
+  text-shadow: 0 8px 0 #8a3a00;
+  opacity: 0;
+}
+
+#banner.show {
+  animation: banner-slam 1.6s ease-out forwards;
+}
+
+@keyframes banner-slam {
+  0% {
+    opacity: 0;
+    transform: scale(3) rotate(-8deg);
+  }
+  15% {
+    opacity: 1;
+    transform: scale(0.92) rotate(-4deg);
+  }
+  25% {
+    transform: scale(1.05) rotate(-4deg);
+  }
+  75% {
+    opacity: 1;
+    transform: scale(1) rotate(-4deg);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.1) rotate(-4deg);
+  }
+}
+
 #modal {
   position: absolute;
   inset: 0;

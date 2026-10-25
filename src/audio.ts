@@ -68,6 +68,15 @@ export class Sfx {
       case 'win':
         [523, 659, 784, 1046].forEach((f, i) => this.tone(f, 0.22, 'triangle', 0.1, undefined, i * 0.12));
         break;
+      case 'unlock':
+        this.tone(900, 0.06, 'square', 0.05);
+        this.tone(1350, 0.12, 'triangle', 0.08, undefined, 0.06);
+        break;
+      case 'close':
+        // Low whoosh, then a bright sparkle as the clock is beaten.
+        this.tone(160, 0.5, 'sawtooth', 0.07, 55);
+        [1046, 1318, 1568, 2093].forEach((f, i) => this.tone(f, 0.18, 'sine', 0.07, undefined, 0.25 + i * 0.07));
+        break;
       case 'lose':
         [392, 330, 262].forEach((f, i) => this.tone(f, 0.3, 'sawtooth', 0.06, undefined, i * 0.18));
         break;

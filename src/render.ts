@@ -23,6 +23,8 @@ import { MYSTERY, PALETTE, type Shade } from './palette';
 import { personPos, QUEUE_VISIBLE } from './queuePath';
 import type { ColorId } from './types';
 
+const LOCK_TINTS = ['#ffd84a', '#7ff0ff', '#ff8fd0'];
+
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath();
   ctx.roundRect(x, y, w, h, r);
@@ -135,6 +137,45 @@ export class Renderer {
       ctx.restore();
     }
     this.drawBus(bus, bus.x + ox, bus.y + oy, angle);
+    if (bus.key >= 0) this.drawLockBadge(bus, bus.x + ox, bus.y + oy, angle, 'key');
+    else if (game.isLocked(bus)) this.drawLockBadge(bus, bus.x + ox, bus.y + oy, angle, 'lock');
+  }
+
+  /** Padlock or key on the bus's tail, tinted per lock pair so pairs are easy to match. */
+  private drawLockBadge(bus: Bus, x: number, y: number, angle: number, kind: 'lock' | 'key'): void {
+    const ctx = this.ctx;
+    const pair = kind === 'key' ? bus.key : bus.lock;
+    const tint = LOCK_TINTS[pair % LOCK_TINTS.length];
+    const len = busLenPx(bus.length);
+    let s = 1.15;
+    if (bus.popT >= 0) s *= 1 + 0.35 * Math.sin(bus.popT * Math.PI);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    ctx.translate(-len / 2 + 15, 0);
+    ctx.rotate(-angle);
+    ctx.scale(s, s);
+    ctx.fillStyle = '#1e2438';
+    circle(ctx, 0, 0, 12);
+    ctx.fillStyle = tint;
+    ctx.strokeStyle = tint;
+    ctx.lineWidth = 2.5;
+    if (kind === 'lock') {
+      ctx.beginPath();
+      ctx.arc(0, -2, 4.5, Math.PI, 0);
+      ctx.stroke();
+      roundRect(ctx, -6.5, -2, 13, 9.5, 2);
+      ctx.fill();
+    } else {
+      ctx.beginPath();
+      ctx.arc(-3.5, 0, 4, 0, Math.PI * 2);
+      ctx.moveTo(0.5, 0);
+      ctx.lineTo(8, 0);
+      ctx.moveTo(6, 0);
+      ctx.lineTo(6, 3.5);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   private drawBus(bus: Bus, x: number, y: number, angle: number): void {

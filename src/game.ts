@@ -33,7 +33,9 @@ export type SoundName =
   | 'error'
   | 'booster'
   | 'win'
-  | 'lose';
+  | 'lose'
+  | 'unlock'
+  | 'close';
 
 export interface Waypoint {
   x: number;
@@ -84,6 +86,8 @@ export interface GameEvents {
   toast(msg: string): void;
   stuck(): void;
   end(won: boolean, reason: string): void;
+  /** The last passenger boarded after a near-loss. */
+  closeCall(): void;
 }
 
 const DRIVE_SPEED = 950;
@@ -91,6 +95,11 @@ const LIFT_SPEED = 650;
 const BOARD_INTERVAL = 0.045;
 const FLY_TIME = 0.2;
 const START_BOOSTERS = { vip: 1, slot: 1 };
+/** Finishing with this many seconds or fewer left counts as a close call. */
+const CLOSE_TIME = 10;
+/** Real seconds of slow motion after a close-call finish, and how slow. */
+const SLOW_MO = 1.2;
+const SLOW_MO_RATE = 0.3;
 
 export const dirAngle = (d: Dir): number =>
   d === 'right' ? 0 : d === 'down' ? Math.PI / 2 : d === 'left' ? Math.PI : -Math.PI / 2;
@@ -157,6 +166,9 @@ export class Game {
   status: 'playing' | 'won' | 'lost' = 'playing';
   boosters = { ...START_BOOSTERS };
   vipMode = false;
+  /** Set when the player got out of a jam or cut it fine on time. */
+  closeCall = false;
+  private slowMo = 0;
   private boardTimer = 0;
   private stuckNotified = false;
   private pendingEnd: { won: boolean; reason: string; t: number } | null = null;
@@ -212,6 +224,11 @@ export class Game {
     return this.buses.filter((b) => b.state === 'lot');
   }
 
+  /** A locked bus can't drive out while its key bus is still in the lot. */
+  isLocked(bus: Bus): boolean {
+    return bus.lock >= 0 && this.buses.some((b) => b.key === bus.lock && b.state === 'lot');
+  }
+
   canUseVip(): boolean {
     return this.boosters.vip > 0 && !this.slots[0].bus && this.lotBuses.length > 0;
   }
@@ -238,6 +255,15 @@ export class Game {
 
     if (this.vipMode) {
       this.liftToVip(bus);
+      return;
+    }
+
+    if (this.isLocked(bus)) {
+      bus.shakeT = 0;
+      const key = this.buses.find((b) => b.key === bus.lock);
+      if (key) key.popT = 0;
+      this.events.sound('bump');
+      this.events.toast('Locked! Get the key bus out first');
       return;
     }
 
@@ -354,6 +380,7 @@ export class Game {
     ]);
     this.events.sound('go');
     this.updateReveals(true);
+    this.releaseLock(bus);
   }
 
   private liftToVip(bus: Bus): void {
@@ -371,6 +398,18 @@ export class Game {
     this.setPath(bus, [{ x: slotCenterX(0), y: dockY(bus.length) }]);
     this.events.sound('booster');
     this.updateReveals(true);
+    this.releaseLock(bus);
+  }
+
+  /** A key bus leaving the lot pops open its matching lock. */
+  private releaseLock(bus: Bus): void {
+    if (bus.key < 0) return;
+    for (const b of this.buses) {
+      if (b.lock === bus.key && b.state === 'lot') {
+        b.popT = 0;
+        this.events.sound('unlock');
+      }
+    }
   }
 
   private depart(bus: Bus): void {
@@ -443,6 +482,10 @@ export class Game {
   // ---- simulation --------------------------------------------------------
 
   update(dt: number): void {
+    if (this.slowMo > 0) {
+      this.slowMo -= dt;
+      dt *= SLOW_MO_RATE;
+    }
     for (const bus of this.buses) {
       if (bus.bumpT >= 0) {
         bus.bumpT += dt / 0.35;
@@ -496,7 +539,16 @@ export class Game {
       this.flyers.push({ color, x0, y0, bus: target, t: 0 });
       this.boardTimer += BOARD_INTERVAL;
       this.events.sound('board');
+      if (this.qHead === this.queue.length) this.onLastBoard();
     }
+  }
+
+  private onLastBoard(): void {
+    if (this.time <= CLOSE_TIME) this.closeCall = true;
+    if (!this.closeCall) return;
+    this.slowMo = SLOW_MO;
+    this.events.sound('close');
+    this.events.closeCall();
   }
 
   private seatFor(color: ColorId): Bus | undefined {
@@ -545,6 +597,8 @@ export class Game {
       this.stuckNotified = false;
       return;
     }
+    // Getting out of a full, stuck lot (with a booster) and still winning is a close call.
+    this.closeCall = true;
     if (this.canUseVip() || this.canUseSlot()) {
       if (!this.stuckNotified) {
         this.stuckNotified = true;

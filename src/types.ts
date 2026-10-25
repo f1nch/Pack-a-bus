@@ -20,6 +20,10 @@ export interface BusSpec {
   col: number;
   row: number;
   mystery: boolean;
+  /** Lock pair this bus is locked by (-1 = none); it can't leave while that pair's key bus is in the lot. */
+  lock: number;
+  /** Lock pair this bus holds the key for (-1 = none). */
+  key: number;
 }
 
 /** Every 10th level gets one of these twists. */
