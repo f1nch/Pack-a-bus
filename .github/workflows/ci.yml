@@ -14,6 +14,6 @@ permissions:
 
 jobs:
   ci:
-    uses: f1nch/ci-workflows/.github/workflows/node-ci.yml@v1
+    uses: f1nch/ci-workflows/.github/workflows/node-ci.yml@b4b35ffd28b9f829549f8370c610f681bea2cf58 # v1
     with:
       audit-level: high

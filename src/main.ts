@@ -4,6 +4,7 @@ import { Game } from './game';
 import { H, W } from './layout';
 import { generateLevel } from './level';
 import { Renderer } from './render';
+import type { LevelData } from './types';
 
 const LEVEL_KEY = 'pack-a-bus.level';
 const SOUND_KEY = 'pack-a-bus.muted';
@@ -51,15 +52,34 @@ const el = {
   modalBtn: $<HTMLButtonElement>('#modal-btn'),
 };
 
-let levelNum = Math.max(1, parseInt(load(LEVEL_KEY) ?? '1', 10) || 1);
+// Saved progress is untrusted (other pages on this origin can write it), so clamp it.
+const MAX_LEVEL = 100_000;
+const clampLevel = (n: number): number =>
+  Number.isSafeInteger(n) && n >= 1 ? Math.min(n, MAX_LEVEL) : 1;
+
+let levelNum = clampLevel(parseInt(load(LEVEL_KEY) ?? '1', 10));
 let game: Game;
 let paused = true;
 let modalAction: () => void = () => {};
 
-function startLevel(n: number): void {
+// Generate before saving, so a level that fails to build is never persisted and
+// can't brick every reload. On failure, skip ahead a few levels, then fall back to 1.
+function buildLevel(n: number): { n: number; level: LevelData } {
+  for (let i = 0; i < 5 && n + i <= MAX_LEVEL; i++) {
+    try {
+      return { n: n + i, level: generateLevel(n + i) };
+    } catch (err) {
+      console.error(err);
+    }
+  }
+  return { n: 1, level: generateLevel(1) };
+}
+
+function startLevel(requested: number): void {
+  const { n, level } = buildLevel(clampLevel(requested));
   levelNum = n;
   save(LEVEL_KEY, String(n));
-  game = new Game(generateLevel(n), {
+  game = new Game(level, {
     sound: (name) => sfx.play(name),
     toast,
     stuck: () => {
