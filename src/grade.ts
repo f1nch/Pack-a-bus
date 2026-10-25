@@ -99,12 +99,16 @@ export function gradeLevel(data: LevelData): Grade {
   return Math.min(2, game.boostersUsed) as Grade;
 }
 
-/** Generates a few layouts for the level and keeps the one whose grade is closest to
- *  the curve's target, then flags it by the grade it actually measured. */
-export function buildGradedLevel(n: number): LevelData {
-  const target = targetGrade(n);
+/** Grades `count` layout variants of level `n` and keeps the one `better` prefers
+ *  (stopping early once `done` says it's good enough), flagged by its measured grade. */
+function pickLayout(
+  n: number,
+  count: number,
+  better: (grade: Grade, best: Grade) => boolean,
+  done: (grade: Grade) => boolean,
+): LevelData {
   let best: { level: LevelData; grade: Grade } | null = null;
-  for (let v = 0; v < CANDIDATES; v++) {
+  for (let v = 0; v < count; v++) {
     let level: LevelData;
     try {
       level = generateLevel(n, v);
@@ -112,12 +116,34 @@ export function buildGradedLevel(n: number): LevelData {
       continue;
     }
     const grade = gradeLevel(level);
-    if (!best || Math.abs(grade - target) < Math.abs(best.grade - target)) best = { level, grade };
-    if (grade === target) break;
+    if (!best || better(grade, best.grade)) best = { level, grade };
+    if (done(grade)) break;
   }
   if (!best) throw new Error(`could not generate level ${n}`);
   const { level, grade } = best;
   // Special levels already announce their twist; don't stack a second warning on them.
   level.difficulty = level.twist ? null : grade === 3 ? 'super' : grade === 2 ? 'hard' : null;
   return level;
+}
+
+/** Generates a few layouts for the level and keeps the one whose grade is closest to
+ *  the curve's target, then flags it by the grade it actually measured. */
+export function buildGradedLevel(n: number): LevelData {
+  const target = targetGrade(n);
+  return pickLayout(
+    n,
+    CANDIDATES,
+    (g, b) => Math.abs(g - target) < Math.abs(b - target),
+    (g) => g === target,
+  );
+}
+
+/** Opt-in help after repeated losses: the easiest layout among a wider set of candidates. */
+export function buildGentlerLevel(n: number): LevelData {
+  return pickLayout(
+    n,
+    CANDIDATES * 2,
+    (g, b) => g < b,
+    (g) => g === 0,
+  );
 }

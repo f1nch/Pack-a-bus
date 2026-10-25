@@ -2,7 +2,7 @@ import './style.css';
 import { Sfx } from './audio';
 import { Game } from './game';
 import { H, W } from './layout';
-import { buildGradedLevel } from './grade';
+import { buildGentlerLevel, buildGradedLevel } from './grade';
 import { twistFor } from './level';
 import { Renderer } from './render';
 import { bonusSpots, freeBoosters, starPoints, STARS_PER_BONUS, starsFor } from './stars';
@@ -10,6 +10,7 @@ import type { Difficulty, LevelData, Twist } from './types';
 
 const LEVEL_KEY = 'pack-a-bus.level';
 const SOUND_KEY = 'pack-a-bus.muted';
+const SHAPES_KEY = 'pack-a-bus.shapes';
 const starsKey = (n: number) => `pack-a-bus.stars.${n}`;
 /** Difficulty flag of a won level, so its stars keep their multiplier in the total. */
 const diffKey = (n: number) => `pack-a-bus.diff.${n}`;
@@ -85,7 +86,11 @@ const el = {
   modalStars: $('#modal-stars'),
   modalText: $('#modal-text'),
   modalNote: $('#modal-note'),
+  modalBar: $('#modal-bar'),
+  modalSegs: $('#modal-segs'),
   modalBtn: $<HTMLButtonElement>('#modal-btn'),
+  modalAlt: $<HTMLButtonElement>('#modal-alt'),
+  shapes: $<HTMLButtonElement>('#btn-shapes'),
 };
 
 // Saved progress is untrusted (other pages on this origin can write it), so clamp it.
@@ -97,15 +102,23 @@ let levelNum = clampLevel(parseInt(load(LEVEL_KEY) ?? '1', 10));
 let game: Game;
 let paused = true;
 let modalAction: () => void = () => {};
+let altAction: (() => void) | null = null;
 /** Level whose intro cards were already shown, so retries skip straight to play. */
 let introShownFor = 0;
+/** Losses on the current level this session; after a few, a gentler layout is offered. */
+let failsOnLevel = 0;
+const FAILS_BEFORE_HELP = 3;
+/** Playing the opt-in gentler layout, which tops out at 2 stars. */
+let gentle = false;
+const GENTLE_STAR_CAP = 2;
 
 // Generate before saving, so a level that fails to build is never persisted and
 // can't brick every reload. On failure, skip ahead a few levels, then fall back to 1.
-function buildLevel(n: number): { n: number; level: LevelData } {
+function buildLevel(n: number, easier: boolean): { n: number; level: LevelData } {
+  const build = easier ? buildGentlerLevel : buildGradedLevel;
   for (let i = 0; i < 5 && n + i <= MAX_LEVEL; i++) {
     try {
-      return { n: n + i, level: buildGradedLevel(n + i) };
+      return { n: n + i, level: build(n + i) };
     } catch (err) {
       console.error(err);
     }
@@ -113,8 +126,10 @@ function buildLevel(n: number): { n: number; level: LevelData } {
   return { n: 1, level: buildGradedLevel(1) };
 }
 
-function startLevel(requested: number): void {
-  const { n, level } = buildLevel(clampLevel(requested));
+function startLevel(requested: number, easier = false): void {
+  const { n, level } = buildLevel(clampLevel(requested), easier);
+  if (n !== levelNum) failsOnLevel = 0;
+  gentle = easier && n === requested;
   levelNum = n;
   save(LEVEL_KEY, String(n));
   game = new Game(level, {
@@ -124,10 +139,7 @@ function startLevel(requested: number): void {
       el.vip.classList.toggle('pulse', game.canUseVip());
       el.slot.classList.toggle('pulse', game.canUseSlot());
     },
-    end: (won, reason) => {
-      if (won) showWin(reason);
-      else showModal('Level Failed', reason, 'Try Again', () => startLevel(levelNum));
-    },
+    end: (won, reason) => (won ? showWin(reason) : showFail(reason)),
     closeCall: () => showBanner('CLOSE CALL!'),
     bonusSpotUsed: () => save(BONUS_SPENT_KEY, String(bonusSpent() + 1)),
   }, bonusSpots(totalStars(), bonusSpent()));
@@ -139,6 +151,25 @@ function startLevel(requested: number): void {
   el.vip.classList.remove('pulse');
   el.slot.classList.remove('pulse');
   showTwistOrPlay();
+  if (gentle) toast(`Gentler layout: up to ${GENTLE_STAR_CAP}★`);
+}
+
+/** Losing says how close you got, retries in one tap, and after a few losses offers an
+ *  opt-in gentler layout (never forced, never sold). */
+function showFail(reason: string): void {
+  failsOnLevel++;
+  const total = game.queue.length;
+  const seated = total - game.remaining;
+  const frac = total > 0 ? seated / total : 0;
+  const pct = Math.round(frac * 100);
+  const title = frac >= 0.85 ? 'So close!' : 'Level Failed';
+  const offerHelp = failsOnLevel >= FAILS_BEFORE_HELP && !gentle;
+  showModal(title, `${reason} You seated ${seated} of ${total} passengers.`, 'Try Again', () => startLevel(levelNum, gentle), {
+    bar: { value: frac, label: `${pct}% seated` },
+    alt: offerHelp
+      ? { label: `Try a gentler layout (max ${GENTLE_STAR_CAP}★)`, action: () => startLevel(levelNum, true) }
+      : undefined,
+  });
 }
 
 /** Best stars saved for a level, 0 if never won (or the saved value is junk). */
@@ -174,8 +205,9 @@ function bonusSpent(): number {
 function showWin(reason: string): void {
   const difficulty = game.level.difficulty;
   const free = freeBoosters(difficulty);
-  const stars = starsFor(game.time, game.level.time, game.boostersUsed, free);
+  const stars = starsFor(game.time, game.level.time, game.boostersUsed, free, gentle ? GENTLE_STAR_CAP : 3);
   const best = bestStars(levelNum);
+  failsOnLevel = 0;
   const before = totalStars();
   if (stars > best) save(starsKey(levelNum), String(stars));
   if (difficulty) save(diffKey(levelNum), difficulty);
@@ -185,21 +217,46 @@ function showWin(reason: string): void {
   const earned = Math.floor(after / STARS_PER_BONUS) > Math.floor(before / STARS_PER_BONUS);
   if (stars > best && best > 0) lines.push('New best!');
   else if (best > stars) lines.push(`Your best: ${'★'.repeat(best)}`);
-  if (stars < 3) {
+  if (gentle) lines.push(`Gentler layout: replay the normal one for 3★.`);
+  else if (stars < 3) {
     lines.push(game.boostersUsed > free ? 'Skip the boosters for more stars.' : 'Finish faster for more stars.');
   }
   if (twistFor(levelNum + 1)) lines.push('Next up: a special level!');
 
   const notes: string[] = [];
   if (difficulty) notes.push(`×${difficulty === 'super' ? 3 : 2} stars: +${starPoints(stars, difficulty)} toward your total`);
-  if (earned) notes.push(`🎁 ${after} stars: bonus +Spot earned!`);
   const title = difficulty ? DIFFICULTY_INFO[difficulty].win : game.closeCall ? 'Close Call!' : 'Level Complete!';
   if (difficulty) sfx.play('close');
   showModal(title, lines.join(' '), 'Next Level', () => startLevel(levelNum + 1), {
     stars,
     tone: difficulty ? 'danger' : undefined,
     note: notes.length ? notes.join(' · ') : undefined,
+    segs: { before, after, earned },
   });
+}
+
+/** Progress toward the next bonus +Spot: the stars you already had, then this level's
+ *  new ones lighting up one by one. Crossing the line fills the bar and announces it. */
+function renderSegs(before: number, after: number, earned: boolean): void {
+  const track = el.modalSegs.querySelector('.track')!;
+  const label = el.modalSegs.querySelector('.label')!;
+  const had = before % STARS_PER_BONUS;
+  const have = earned ? STARS_PER_BONUS : after % STARS_PER_BONUS;
+  track.replaceChildren(
+    ...Array.from({ length: STARS_PER_BONUS }, (_, i) => {
+      const seg = document.createElement('span');
+      if (i < had) seg.className = 'on';
+      else if (i < have) {
+        seg.className = 'on new';
+        seg.style.animationDelay = `${0.55 + (i - had) * 0.12}s`;
+      }
+      return seg;
+    }),
+  );
+  label.textContent = earned
+    ? `🎁 Bonus +Spot earned! ★ ${after}`
+    : `${STARS_PER_BONUS - (after % STARS_PER_BONUS)} more ★ for a bonus +Spot`;
+  el.modalSegs.classList.toggle('earned', earned);
 }
 
 interface Card {
@@ -274,12 +331,34 @@ function showModal(
   text: string,
   button: string,
   action: () => void,
-  opts: { stars?: number; tone?: 'gold' | 'danger'; note?: string } = {},
+  opts: {
+    stars?: number;
+    tone?: 'gold' | 'danger';
+    note?: string;
+    /** A plain progress bar (how much of a failed level got done). */
+    bar?: { value: number; label: string };
+    /** Star progress toward the next bonus +Spot. */
+    segs?: { before: number; after: number; earned: boolean };
+    /** A secondary, quieter choice under the main button. */
+    alt?: { label: string; action: () => void };
+  } = {},
 ): void {
   el.modalCard.classList.toggle('special', opts.tone === 'gold');
   el.modalCard.classList.toggle('danger', opts.tone === 'danger');
   el.modalNote.textContent = opts.note ?? '';
   el.modalNote.classList.toggle('hidden', !opts.note);
+  el.modalBar.classList.toggle('hidden', !opts.bar);
+  if (opts.bar) {
+    const pct = Math.round(opts.bar.value * 100);
+    el.modalBar.setAttribute('aria-valuenow', String(pct));
+    (el.modalBar.querySelector('.fill') as HTMLElement).style.width = `${pct}%`;
+    el.modalBar.querySelector('.label')!.textContent = opts.bar.label;
+  }
+  el.modalSegs.classList.toggle('hidden', !opts.segs);
+  if (opts.segs) renderSegs(opts.segs.before, opts.segs.after, opts.segs.earned);
+  el.modalAlt.classList.toggle('hidden', !opts.alt);
+  el.modalAlt.textContent = opts.alt?.label ?? '';
+  altAction = opts.alt?.action ?? null;
   el.modalStars.classList.toggle('hidden', opts.stars === undefined);
   if (opts.stars !== undefined) {
     // Re-create the stars so their pop-in animation replays every time.
@@ -312,7 +391,24 @@ el.modalBtn.addEventListener('click', () => {
 });
 el.restart.addEventListener('click', () => {
   sfx.unlock();
-  startLevel(levelNum);
+  startLevel(levelNum, gentle);
+});
+el.modalAlt.addEventListener('click', () => {
+  sfx.unlock();
+  altAction?.();
+});
+function setPassengerShapes(on: boolean): void {
+  renderer.passengerShapes = on;
+  el.shapes.setAttribute('aria-pressed', String(on));
+  el.shapes.classList.toggle('active', on);
+}
+setPassengerShapes(load(SHAPES_KEY) === '1');
+el.shapes.addEventListener('click', () => {
+  sfx.unlock();
+  const on = !renderer.passengerShapes;
+  setPassengerShapes(on);
+  save(SHAPES_KEY, on ? '1' : '0');
+  toast(on ? 'Shapes on passengers: on' : 'Shapes on passengers: off');
 });
 el.sound.addEventListener('click', () => {
   sfx.unlock();

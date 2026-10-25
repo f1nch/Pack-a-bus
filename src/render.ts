@@ -19,11 +19,71 @@ import {
   slotCenterX,
   W,
 } from './layout';
-import { MYSTERY, PALETTE, type Shade } from './palette';
+import { MYSTERY, PALETTE, SYMBOLS, type Shade, type ShapeId } from './palette';
 import { personPos, QUEUE_VISIBLE } from './queuePath';
 import type { ColorId } from './types';
 
 const LOCK_TINTS = ['#ffd84a', '#7ff0ff', '#ff8fd0'];
+
+/** Draws a color's symbol centered on (x, y) with radius r, in the current fillStyle. */
+function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeId, x: number, y: number, r: number): void {
+  ctx.beginPath();
+  switch (shape) {
+    case 'circle':
+      ctx.arc(x, y, r * 0.9, 0, Math.PI * 2);
+      break;
+    case 'square':
+      ctx.rect(x - r * 0.78, y - r * 0.78, r * 1.56, r * 1.56);
+      break;
+    case 'triangle':
+      ctx.moveTo(x, y - r);
+      ctx.lineTo(x + r * 0.95, y + r * 0.75);
+      ctx.lineTo(x - r * 0.95, y + r * 0.75);
+      break;
+    case 'star':
+      for (let i = 0; i < 10; i++) {
+        const a = -Math.PI / 2 + (i * Math.PI) / 5;
+        const rr = i % 2 ? r * 0.45 : r;
+        ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+      }
+      break;
+    case 'diamond':
+      ctx.moveTo(x, y - r);
+      ctx.lineTo(x + r * 0.75, y);
+      ctx.lineTo(x, y + r);
+      ctx.lineTo(x - r * 0.75, y);
+      break;
+    case 'hexagon':
+      for (let i = 0; i < 6; i++) {
+        const a = (i * Math.PI) / 3;
+        ctx.lineTo(x + Math.cos(a) * r * 0.92, y + Math.sin(a) * r * 0.92);
+      }
+      break;
+    case 'plus': {
+      const t = r * 0.36;
+      ctx.rect(x - r, y - t, r * 2, t * 2);
+      ctx.rect(x - t, y - r, t * 2, r * 2);
+      break;
+    }
+    case 'heart':
+      ctx.moveTo(x, y + r * 0.9);
+      ctx.bezierCurveTo(x - r * 1.3, y - r * 0.1, x - r * 0.6, y - r * 1.1, x, y - r * 0.35);
+      ctx.bezierCurveTo(x + r * 0.6, y - r * 1.1, x + r * 1.3, y - r * 0.1, x, y + r * 0.9);
+      break;
+    case 'cross': {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(Math.PI / 4);
+      const t = r * 0.34;
+      ctx.rect(-r, -t, r * 2, t * 2);
+      ctx.rect(-t, -r, t * 2, r * 2);
+      ctx.restore();
+      break;
+    }
+  }
+  ctx.closePath();
+  ctx.fill('nonzero');
+}
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath();
@@ -42,6 +102,8 @@ export class Renderer {
   private clock = 0;
   /** Honors prefers-reduced-motion: no squash/press scaling and no confetti. */
   reducedMotion = false;
+  /** Draw color symbols on passengers too (buses always show theirs). */
+  passengerShapes = false;
 
   constructor(private ctx: CanvasRenderingContext2D) {}
 
@@ -284,6 +346,18 @@ export class Renderer {
     roundRect(ctx, -len / 2 + 6, -w / 2 + 8, len - 22, 5, 3);
     ctx.fill();
     ctx.globalAlpha = 1;
+    if (!bus.mystery) {
+      // Color symbol between the arrow plate and the windshield, kept upright.
+      const sx = len / 2 - 22;
+      ctx.save();
+      ctx.translate(sx, -1);
+      ctx.rotate(-angle);
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      drawShape(ctx, SYMBOLS[bus.color], 0, 0, 7.5);
+      ctx.fillStyle = shade.dark;
+      drawShape(ctx, SYMBOLS[bus.color], 0, 0, 5.5);
+      ctx.restore();
+    }
 
     const showCount = bus.state === 'docked' || bus.state === 'leaving';
     if (!showCount) {
@@ -343,7 +417,7 @@ export class Renderer {
       const [x, y] = personPos(i + game.queueOffset);
       // Little idle bob so the crowd feels alive.
       const bob = Math.sin(this.clock * 6 + i * 0.7) * 0.8;
-      drawPerson(ctx, x, y + bob, color);
+      drawPerson(ctx, x, y + bob, color, 1, this.passengerShapes);
     }
     if (game.remaining > QUEUE_VISIBLE) {
       const [ex, ey] = QUEUE_PATH[QUEUE_PATH.length - 1];
@@ -365,12 +439,19 @@ export class Renderer {
       const y1 = f.bus.y - busLenPx(f.bus.length) / 2 + 18;
       const x = f.x0 + (x1 - f.x0) * t;
       const y = f.y0 + (y1 - f.y0) * t - Math.sin(t * Math.PI) * 28;
-      drawPerson(this.ctx, x, y, f.color, 1 - t * 0.3);
+      drawPerson(this.ctx, x, y, f.color, 1 - t * 0.3, this.passengerShapes);
     }
   }
 }
 
-function drawPerson(ctx: CanvasRenderingContext2D, x: number, y: number, color: ColorId, s = 1) {
+function drawPerson(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  color: ColorId,
+  s = 1,
+  shapes = false,
+) {
   const p = PALETTE[color];
   ctx.fillStyle = 'rgba(0,0,0,0.18)';
   circle(ctx, x + 1, y + 4, 7.5 * s);
@@ -380,6 +461,12 @@ function drawPerson(ctx: CanvasRenderingContext2D, x: number, y: number, color: 
   circle(ctx, x, y, 6.5 * s);
   ctx.fillStyle = p.light;
   circle(ctx, x - 0.5, y - 4 * s, 4.6 * s);
+  if (shapes) {
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    drawShape(ctx, SYMBOLS[color], x, y - 0.5 * s, 4.6 * s);
+    ctx.fillStyle = p.dark;
+    drawShape(ctx, SYMBOLS[color], x, y - 0.5 * s, 3.4 * s);
+  }
 }
 
 function drawBackground(ctx: CanvasRenderingContext2D): void {

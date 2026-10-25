@@ -30,4 +30,29 @@ export const COLOR_ORDER: ColorId[] = [
   'cyan',
 ];
 
+export type ShapeId =
+  | 'circle'
+  | 'square'
+  | 'triangle'
+  | 'star'
+  | 'diamond'
+  | 'hexagon'
+  | 'plus'
+  | 'heart'
+  | 'cross';
+
+/** A distinct shape per color so the puzzle never depends on telling hues apart
+ *  (red/green, blue/cyan, orange/yellow and purple/pink are easy to confuse). */
+export const SYMBOLS: Record<ColorId, ShapeId> = {
+  red: 'circle',
+  blue: 'square',
+  green: 'triangle',
+  yellow: 'star',
+  purple: 'diamond',
+  orange: 'hexagon',
+  white: 'plus',
+  pink: 'heart',
+  cyan: 'cross',
+};
+
 export const MYSTERY: Shade = { fill: '#2a2b33', dark: '#121318', light: '#4a4c57' };

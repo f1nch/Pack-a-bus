@@ -15,11 +15,12 @@ export function bonusSpots(totalStars: number, spent: number): number {
   return Math.max(0, Math.floor(totalStars / STARS_PER_BONUS) - spent);
 }
 
-/** 3 stars for a fast finish, 2 for a decent one; each booster beyond the free ones costs a star. */
-export function starsFor(timeLeft: number, timeTotal: number, boostersUsed: number, free = 0): Stars {
+/** 3 stars for a fast finish, 2 for a decent one; each booster beyond the free ones costs a
+ *  star. `cap` limits the result (the opt-in gentler layout tops out at 2). */
+export function starsFor(timeLeft: number, timeTotal: number, boostersUsed: number, free = 0, cap = 3): Stars {
   const frac = timeTotal > 0 ? timeLeft / timeTotal : 0;
   const base = frac >= 0.4 ? 3 : frac >= 0.2 ? 2 : 1;
-  return Math.max(1, base - Math.max(0, boostersUsed - free)) as Stars;
+  return Math.max(1, Math.min(cap, base - Math.max(0, boostersUsed - free))) as Stars;
 }
 
 /** Flagged levels are graded as needing boosters, so using them there doesn't cost stars. */
